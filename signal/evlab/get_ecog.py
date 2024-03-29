@@ -55,10 +55,10 @@ def save_stimuli(events_table, output_path):
 def remap_channel_type(x):
     if x.startswith('ecog'):
         return 'ecog'
-    if x in ('ground', 'reference'):
-        return 'misc'
     if x == 'ekg':
         return 'ecg'
+    if x in ('ground', 'reference', 'empty'):
+        return 'misc'
     return x
 
 
