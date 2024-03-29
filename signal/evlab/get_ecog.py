@@ -25,6 +25,29 @@ def get_stimuli(h5):
     return events_table
 
 
+def get_langloc(h5):
+    channel_ix = np.argsort(h5['channel_indices'])
+    channel_names = np.array(h5['channel_names'])[channel_ix]
+    n_sensors = len(channel_names)
+    s_vs_n_sig = h5.get('s_vs_n_sig', np.nan)
+    if isinstance(s_vs_n_sig, dict):
+        s_vs_n_sig = s_vs_n_sig['elec_data']
+    else:
+        s_vs_n_sig = np.full((n_sensors,), np.nan)
+    s_vs_n_p_ratio = h5.get('s_vs_n_p_ratio', np.nan)
+    if isinstance(s_vs_n_p_ratio, dict):
+        s_vs_n_p_ratio = s_vs_n_p_ratio['elec_data']
+    else:
+        s_vs_n_p_ratio = np.full((n_sensors,), np.nan)
+    langloc_table = pd.DataFrame(dict(
+        channel=channel_names,
+        s_vs_n_sig=s_vs_n_sig,
+        s_vs_n_p_ratio=s_vs_n_p_ratio
+    ))
+    
+    return langloc_table
+
+
 def save_stimuli(events_table, output_path):
     events_table.to_csv(output_path, index=False)
 
@@ -133,12 +156,17 @@ if __name__ == '__main__':
         stim_stale = stim_mtime == 1
         do_stim = force_restart or (not stim_exists or stim_stale)
 
+        langloc_path = output_path_base + '_langloc.csv'
+        langloc_mtime, langloc_exists = check_deps(langloc_path, [input_path, h5_path])
+        langloc_stale = langloc_mtime == 1
+        do_langloc = force_restart or (not langloc_exists or langloc_stale)
+
         fif_path = output_path_base + '_ieeg.fif'
         fif_mtime, fif_exists = check_deps(fif_path, [input_path, h5_path])
         fif_stale = fif_mtime == 1
         do_fif = force_restart or (not fif_exists or fif_stale)
 
-        if do_stim or do_fif:
+        if do_stim or do_fif or do_langloc:
             # Get MATLAB data
             stderr('  Loading from MATLAB\n')
             h5 = get_matlab_data(h5_path)
@@ -148,6 +176,12 @@ if __name__ == '__main__':
                 stderr('  Saving stimulus table\n')
                 events_table = get_stimuli(h5)
                 save_stimuli(events_table, stim_path)
+
+            # Get and save langloc data
+            if do_langloc:
+                stderr('  Saving LangLoc table\n')
+                langloc_table = get_langloc(h5)
+                save_stimuli(langloc_table, langloc_path)
 
             # Get and save raw signal
             if do_fif:
