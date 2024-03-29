@@ -33,8 +33,10 @@ def exists(path):
 
 def getmtime(path):
     path = os.path.normpath(path)
-
-    return os.path.getmtime(path)
+    if exists(path):
+        return os.path.getmtime(path)
+    
+    return None
 
 
 def get_max_mtime(*mtimes):
