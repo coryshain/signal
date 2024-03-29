@@ -11,7 +11,7 @@ from signal.evlab.initialize import initialize
 
 SUFFIX = '_crunched.mat'
 MATLAB_CMD = textwrap.dedent('''\
-    %s -nodisplay -nosplash -nodesktop -wait -r "addpath(\\"%s\\"); get_ecog(\\"%s\\", \\"%s\\"); exit;"\
+    %s -nodisplay -nosplash -nodesktop -wait -r 'addpath(\\"%s\\"); get_ecog(\\"%s\\", \\"%s\\"); exit;'\
 ''')
 
 
@@ -26,16 +26,17 @@ def get_stimuli(h5):
 
 
 def get_langloc(h5):
-    channel_ix = np.argsort(h5['channel_indices'])
-    channel_names = np.array(h5['channel_names'])[channel_ix]
-    channel_names = remap_duplicate_channel_names(channel_names)
+    channel_ix = np.argsort(h5['elec_ch'])
+    _channel_names = np.array(h5['elec_ch_label'])[channel_ix]
+    _channel_names = remap_duplicate_channel_names(_channel_names)
+    channel_names = _channel_names.tolist()
     n_sensors = len(channel_names)
-    s_vs_n_sig = h5.get('s_vs_n_sig', np.nan)
+    s_vs_n_sig = h5.get('s_vs_n_sig', None)
     if isinstance(s_vs_n_sig, dict):
         s_vs_n_sig = s_vs_n_sig['elec_data']
     else:
         s_vs_n_sig = np.full((n_sensors,), np.nan)
-    s_vs_n_p_ratio = h5.get('s_vs_n_p_ratio', np.nan)
+    s_vs_n_p_ratio = h5.get('s_vs_n_p_ratio', None)
     if isinstance(s_vs_n_p_ratio, dict):
         s_vs_n_p_ratio = s_vs_n_p_ratio['elec_data']
     else:
@@ -82,37 +83,36 @@ def remap_duplicate_channel_names(channel_names):
 
 def get_info(h5):
     # Channel indices
-    channel_ix = np.argsort(h5['channel_indices'])
+    channel_ix = np.argsort(h5['elec_ch'])
 
     # Channel names
-    _channel_names = np.array(h5['channel_names'])[channel_ix]
+    _channel_names = np.array(h5['elec_ch_label'])[channel_ix]
     _channel_names = remap_duplicate_channel_names(_channel_names)
     channel_names = _channel_names.tolist()
 
     # Channel types
-    _channel_types = np.array(h5['channel_types'])[channel_ix]
+    _channel_types = np.array(h5['elec_ch_type'])[channel_ix]
     for i in range(len(_channel_types)):
         _channel_types[i] = remap_channel_type(_channel_types[i])
     channel_types = _channel_types.tolist()
 
     # Bad channels
-    bads = []
-    for x in h5['bad_channels']:
-        _bads = np.array(h5['bad_channels'][x] - 1, dtype=int)
-        if not _bads.shape:
-            _bads = _bads[..., None]
-        bads.append(_bads)
-    bads = np.concatenate(bads)
+    bads = set()
+    for x in ('elec_ch_prelim_deselect', 'elec_ch_user_deselect'):
+        if x in h5:
+            _bads = np.array(h5[x] - 1, dtype=int)
+            if not _bads.shape:
+                _bads = _bads[..., None]
+            for bad in _bads:
+                bads.add(bad)
     misc = channel_ix[_channel_types == 'misc']
-    bads_misc = []
     for bad in misc:
-        if bad not in bads: 
-            bads_misc.append(bad)
-    bads = np.concatenate([bads, np.array(bads_misc, dtype=int)])
+        bads.add(bad)
+    bads = np.array([x for x in bads], dtype=int)
     bads = _channel_names[bads].tolist()
 
     # Sampling frequency
-    sfreq = h5['freq']
+    sfreq = h5['for_preproc']['sample_freq_raw']
 
     # Info object
     info = mne.create_info(
@@ -127,7 +127,7 @@ def get_info(h5):
 
 def get_raw(h5):
     info = get_info(h5)
-    raw = h5['raw']
+    raw = h5['for_preproc']['elec_data_raw']
     raw = mne.io.RawArray(raw, info)
 
     return raw
@@ -154,14 +154,18 @@ if __name__ == '__main__':
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
 
+    mfile_path = join(dirname(dirname(__file__)), 'resources', 'matlab', 'get_ecog.m')
+
     for input_path in [x for x in os.listdir(input_dir) if x.endswith(SUFFIX)]:
         stderr('Processing file %s\n' % input_path)
         name = input_path[:-len(SUFFIX)]
         input_path = join(input_dir, input_path)
         output_path_base = join(output_dir, name)
 
+        deps = [[input_path, mfile_path]]
+
         h5_path = output_path_base + '.h5'
-        h5_mtime, h5_exists = check_deps(h5_path, [input_path])
+        h5_mtime, h5_exists = check_deps(h5_path, deps)
         h5_stale = h5_mtime == 1
         do_h5 = force_restart or (not h5_exists or h5_stale)
         if do_h5:
@@ -174,21 +178,24 @@ if __name__ == '__main__':
             assert not failure, 'MATLAB executable not found'
 
             stderr('  Exporting from MATLAB\n')
+            print(MATLAB_CMD % (matlab, matlab_dir, input_path, h5_path))
             failure = os.system(MATLAB_CMD % (matlab, matlab_dir, input_path, h5_path))
             assert not failure, 'Failure on file %s' % input_path
 
+        deps.append(h5_path)
+
         stim_path = output_path_base + '_stim.csv'
-        stim_mtime, stim_exists = check_deps(stim_path, [input_path, h5_path])
+        stim_mtime, stim_exists = check_deps(stim_path, deps)
         stim_stale = stim_mtime == 1
         do_stim = force_restart or (not stim_exists or stim_stale)
 
         langloc_path = output_path_base + '_langloc.csv'
-        langloc_mtime, langloc_exists = check_deps(langloc_path, [input_path, h5_path])
+        langloc_mtime, langloc_exists = check_deps(langloc_path, deps)
         langloc_stale = langloc_mtime == 1
         do_langloc = force_restart or (not langloc_exists or langloc_stale)
 
         fif_path = output_path_base + '_ieeg.fif'
-        fif_mtime, fif_exists = check_deps(fif_path, [input_path, h5_path])
+        fif_mtime, fif_exists = check_deps(fif_path, deps)
         fif_stale = fif_mtime == 1
         do_fif = force_restart or (not fif_exists or fif_stale)
 
