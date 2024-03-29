@@ -84,9 +84,21 @@ def get_info(h5):
         if not _bads.shape:
             _bads = _bads[..., None]
         bads.append(_bads)
-    bads.append(channel_ix[_channel_types == 'misc'])
     bads = np.concatenate(bads)
+    misc = channel_ix[_channel_types == 'misc']
+    bads_misc = []
+    for bad in misc:
+        if bad not in bads: 
+            bads_misc.append(bad)
+    print(bads)
+    print(bads_misc)
+    bads = np.concatenate([bads, np.array(bads_misc, dtype=int)])
+    print(bads)
     bads = _channel_names[bads].tolist()
+    print(channel_names)
+    print(channel_types)
+    print(bads)
+    print()
 
     # Sampling frequency
     sfreq = h5['freq']
