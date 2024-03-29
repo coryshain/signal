@@ -28,6 +28,7 @@ def get_stimuli(h5):
 def get_langloc(h5):
     channel_ix = np.argsort(h5['channel_indices'])
     channel_names = np.array(h5['channel_names'])[channel_ix]
+    channel_names = remap_duplicate_channel_names(channel_names)
     n_sensors = len(channel_names)
     s_vs_n_sig = h5.get('s_vs_n_sig', np.nan)
     if isinstance(s_vs_n_sig, dict):
@@ -64,11 +65,17 @@ def remap_channel_type(x):
 
 def remap_duplicate_channel_names(channel_names):
     prior_names = set()
-    for i, channel_name in enumerate(channel_names):
+    isarray = isinstance(channel_names, np.ndarray)
+    channel_names = channel_names.tolist()
+    for i in range(len(channel_names)):
+        channel_name = str(channel_names[i])
         while channel_name in prior_names:
-            channel_name += '_'
+            channel_name = channel_name + '_'
         prior_names.add(channel_name)
         channel_names[i] = channel_name
+
+    if isarray:
+        channel_names = np.array(channel_names)
 
     return channel_names
 
