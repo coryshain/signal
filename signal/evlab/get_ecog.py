@@ -94,7 +94,6 @@ def get_info(h5):
     for i in range(len(_channel_types)):
         _channel_types[i] = remap_channel_type(_channel_types[i])
     channel_types = _channel_types.tolist()
-    print(np.unique(channel_types))
 
     # Bad channels
     bads = []
@@ -109,15 +108,8 @@ def get_info(h5):
     for bad in misc:
         if bad not in bads: 
             bads_misc.append(bad)
-    print(bads)
-    print(bads_misc)
     bads = np.concatenate([bads, np.array(bads_misc, dtype=int)])
-    print(bads)
     bads = _channel_names[bads].tolist()
-    print(channel_names)
-    print(channel_types)
-    print(bads)
-    print()
 
     # Sampling frequency
     sfreq = h5['freq']
