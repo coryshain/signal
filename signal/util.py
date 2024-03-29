@@ -35,7 +35,7 @@ def getmtime(path):
     path = os.path.normpath(path)
     if exists(path):
         return os.path.getmtime(path)
-    
+
     return None
 
 

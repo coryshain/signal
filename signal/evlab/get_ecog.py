@@ -11,7 +11,7 @@ from signal.evlab.initialize import initialize
 
 SUFFIX = '_crunched.mat'
 MATLAB_CMD = textwrap.dedent('''\
-    %s -nodisplay -nosplash -nodesktop -wait -r 'addpath(\\"%s\\"); get_ecog(\\"%s\\", \\"%s\\"); exit;'\
+    %s -nodisplay -nosplash -nodesktop -wait -r "addpath(\\"%s\\"); get_ecog(\\"%s\\", \\"%s\\"); exit;"\
 ''')
 
 
