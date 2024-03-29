@@ -57,6 +57,8 @@ def remap_channel_type(x):
         return 'ecog'
     if x == 'ground':
         return 'misc'
+    if x == 'ekg':
+        return 'ecg'
     return x
 
 
