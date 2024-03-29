@@ -55,7 +55,7 @@ def save_stimuli(events_table, output_path):
 def remap_channel_type(x):
     if x.startswith('ecog'):
         return 'ecog'
-    if x == 'ground':
+    if x in ('ground', 'reference'):
         return 'misc'
     if x == 'ekg':
         return 'ecg'
@@ -75,6 +75,7 @@ def get_info(h5):
     for i in range(len(_channel_types)):
         _channel_types[i] = remap_channel_type(_channel_types[i])
     channel_types = _channel_types.tolist()
+    print(np.unique(channel_types))
 
     # Bad channels
     bads = []
