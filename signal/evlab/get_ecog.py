@@ -62,12 +62,24 @@ def remap_channel_type(x):
     return x
 
 
+def remap_duplicate_channel_names(channel_names):
+    prior_names = set()
+    for i, channel_name in enumerate(channel_names):
+        while channel_name in prior_names:
+            channel_name += '_'
+        prior_names.add(channel_name)
+        channel_names[i] = channel_name
+
+    return channel_names
+
+
 def get_info(h5):
     # Channel indices
     channel_ix = np.argsort(h5['channel_indices'])
 
     # Channel names
     _channel_names = np.array(h5['channel_names'])[channel_ix]
+    _channel_names = remap_duplicate_channel_names(_channel_names)
     channel_names = _channel_names.tolist()
 
     # Channel types
