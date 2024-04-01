@@ -28,8 +28,8 @@ end
 
 
 function s = structify(s)
+    s
     if isstruct(s) && length(s) == 1
-        s
         names = fieldnames(s);
         for k=1:length(names)
             s.(names{k}) = structify(s.(names{k}));
