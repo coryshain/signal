@@ -28,20 +28,25 @@ end
 
 
 function s = structify(s)
-    names = fieldnames(s);
-    for k=1:length(names)
-        val = s.(names{k});
-        if istable(val)
-            s.(names{k}) = table2struct(val);
-        elseif isa(val, 'containers.Map')
-            val_ = struct;
-            val_.keys = val.keys;
-            val_.values = val.values;
-            s.(names{k}) = val_;
-        elseif isstruct(val)
-            val = structify(val);
-            s.(names{k}) = val;
+    if isstruct(s) && length(s) == 1
+        s
+        names = fieldnames(s);
+        for k=1:length(names)
+            s.(names{k}) = structify(s.(names{k}));
         end
+    elseif iscell(s)
+        for k=1:length(s)
+            s{k} = structify(s{k});
+        end
+    elseif istable(s)
+        s = table2struct(s);
+    elseif isa(s, 'containers.Map')
+        s_ = struct;
+        s_.keys = s.keys;
+        s_.values = s.values;
+        s = s_;
+    elseif isobject(s)
+        s = structify(s);
     end
 end
 

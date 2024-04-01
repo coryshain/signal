@@ -11,7 +11,7 @@ from signal.evlab.initialize import initialize
 
 SUFFIX = '_crunched.mat'
 MATLAB_CMD = textwrap.dedent('''\
-    %s -nodisplay -nosplash -nodesktop -wait -r "addpath(\\"%s\\"); get_ecog(\\"%s\\", \\"%s\\"); exit;"\
+    %s -nodisplay -nosplash -nodesktop -wait -r "addpath('%s'); get_ecog('%s', '%s'); exit;"\
 ''')
 
 
@@ -19,10 +19,85 @@ def get_matlab_data(path):
     return read_mat(path)['s']
 
 
-def get_stimuli(h5):
-    events_table = pd.DataFrame(h5['events_table'])
+def get_stimulus_data(h5, stimulus_type='event'):
+    timing_tables = h5['for_preproc']['trial_timing_raw']
+    freq = h5['for_preproc']['sample_freq_raw']
 
-    return events_table
+    if stimulus_type in ('trial', 'event'):
+        events_table = pd.DataFrame(h5['events_table']).rename(
+            dict(
+                stimulus_offset='trial_offset'
+            ),
+            axis=1
+        )
+        stimulus_data = []
+        for i, timing_table in enumerate(timing_tables):
+            event_table = events_table.loc[i].copy()
+
+            timing_table = pd.DataFrame(timing_table).rename(
+                dict(
+                    start='event_onset',
+                    xEnd='event_offset',
+                ),
+                axis=1
+            )
+
+            event_onset = timing_table['event_onset'].values
+            event_onset = (event_onset - 1) / freq
+            event_offset = timing_table['event_offset'].values
+            event_offset = (event_offset - 1) / freq
+            event_duration = event_offset - event_onset
+
+            trial_onset = event_onset[0]
+            trial_offset = event_offset[-1]
+            trial_duration = trial_offset - trial_onset
+            trial_index = i + 1
+
+            if stimulus_type == 'event':
+                timing_table['event_onset'] = event_onset
+                timing_table['event_offset'] = event_offset
+                timing_table['event_duration'] = event_duration
+
+                timing_table['trial_onset'] = trial_onset
+                timing_table['trial_offset'] = trial_offset
+                timing_table['trial_duration'] = trial_duration
+
+                timing_table['trial_index'] = trial_index
+                timing_table['event_index_in_trial'] = np.arange(len(timing_table)) + 1
+
+                for col in event_table.index:
+                    if col not in timing_table:
+                        timing_table[col] = event_table[col]
+
+                stimulus_data.append(timing_table)
+            else:
+                event_table['trial_onset'] = trial_onset
+                event_table['trial_offset'] = trial_offset
+                event_table['trial_duration'] = trial_duration
+
+                event_table['trial_index'] = trial_index
+
+                stimulus_data.append(event_table.to_frame().T)
+
+        stimulus_data = pd.concat(stimulus_data, axis=0)
+        if stimulus_type == 'event':
+            stimulus_data['event_index'] = np.arange(len(stimulus_data)) + 1
+
+    elif stimulus_type == 'session':
+        recording_end = h5['for_preproc']['elec_data_raw'].shape[-1] / freq
+        session_onset = (np.array(h5['for_preproc']['stitch_index_raw']) - 1) / freq
+        session_offset = np.concatenate([session_onset[:-1], [recording_end]])
+        session_index = np.arange(len(session_onset)) + 1
+        stimulus_data = pd.DataFrame(dict(
+            session_onset=session_onset,
+            session_offset=session_offset,
+            session_index=session_index
+        ))
+
+    else:
+        raise ValueError('Unrecognized stimulus type %s' % stimulus_type)
+
+    return stimulus_data
 
 
 def get_langloc(h5):
@@ -50,8 +125,8 @@ def get_langloc(h5):
     return langloc_table
 
 
-def save_stimuli(events_table, output_path):
-    events_table.to_csv(output_path, index=False)
+def save_stimulus_data(stimulus_data, output_path):
+    stimulus_data.to_csv(output_path, index=False)
 
 
 def remap_channel_type(x):
@@ -141,13 +216,13 @@ if __name__ == '__main__':
     argparser = argparse.ArgumentParser(textwrap.dedent('''\
         Convert MATLAB objects from EvLab ECoG pipeline to HDF5 (brain data) and CSV (stimuli).'''
     ))
-    argparser.add_argument('input_dir', help='Input directory containing MATLAB (*.mat) objects.')
+    argparser.add_argument('input_paths', nargs='+', help='Input directory containing MATLAB (*.mat) objects.')
     argparser.add_argument('output_dir', help='Output directory in which to place HDF5 and CSV files.')
     argparser.add_argument('-f', '--force_restart', action='store_true',
                            help='Force restart. Otherwise, skip existing files.')
     args = argparser.parse_args()
 
-    input_dir = args.input_dir
+    input_paths = args.input_paths
     output_dir = args.output_dir
     force_restart = args.force_restart
 
@@ -156,10 +231,12 @@ if __name__ == '__main__':
 
     mfile_path = join(dirname(dirname(__file__)), 'resources', 'matlab', 'get_ecog.m')
 
-    for input_path in [x for x in os.listdir(input_dir) if x.endswith(SUFFIX)]:
+    for input_path in args.input_paths:
+        if not exists(input_path):
+            stderr('File %s does not exist, skipping.\n' % input_path)
+            continue
         stderr('Processing file %s\n' % input_path)
-        name = input_path[:-len(SUFFIX)]
-        input_path = join(input_dir, input_path)
+        name = basename(input_path)[:-len(SUFFIX)]
         output_path_base = join(output_dir, name)
 
         deps = [[input_path, mfile_path]]
@@ -178,16 +255,26 @@ if __name__ == '__main__':
             assert not failure, 'MATLAB executable not found'
 
             stderr('  Exporting from MATLAB\n')
-            print(MATLAB_CMD % (matlab, matlab_dir, input_path, h5_path))
+            stderr(MATLAB_CMD % (matlab, matlab_dir, input_path, h5_path) + '\n')
             failure = os.system(MATLAB_CMD % (matlab, matlab_dir, input_path, h5_path))
             assert not failure, 'Failure on file %s' % input_path
 
         deps.append(h5_path)
 
-        stim_path = output_path_base + '_stim.csv'
-        stim_mtime, stim_exists = check_deps(stim_path, deps)
-        stim_stale = stim_mtime == 1
-        do_stim = force_restart or (not stim_exists or stim_stale)
+        session_path = output_path_base + '_stim_session.csv'
+        session_mtime, session_exists = check_deps(session_path, deps)
+        session_stale = session_mtime == 1
+        do_session = force_restart or (not session_exists or session_stale)
+
+        trial_path = output_path_base + '_stim_trial.csv'
+        trial_mtime, trial_exists = check_deps(trial_path, deps)
+        trial_stale = trial_mtime == 1
+        do_trial = force_restart or (not trial_exists or trial_stale)
+
+        event_path = output_path_base + '_stim_event.csv'
+        event_mtime, event_exists = check_deps(event_path, deps)
+        event_stale = event_mtime == 1
+        do_event = force_restart or (not event_exists or event_stale)
 
         langloc_path = output_path_base + '_langloc.csv'
         langloc_mtime, langloc_exists = check_deps(langloc_path, deps)
@@ -199,22 +286,34 @@ if __name__ == '__main__':
         fif_stale = fif_mtime == 1
         do_fif = force_restart or (not fif_exists or fif_stale)
 
-        if do_stim or do_fif or do_langloc:
+        if do_session or do_trial or do_event or do_fif or do_langloc:
             # Get MATLAB data
             stderr('  Loading from MATLAB\n')
             h5 = get_matlab_data(h5_path)
 
-            # Get and save stimulus data
-            if do_stim:
-                stderr('  Saving stimulus table\n')
-                events_table = get_stimuli(h5)
-                save_stimuli(events_table, stim_path)
+            # Get and save session data
+            if do_session:
+                stderr('  Saving session table\n')
+                session_table = get_stimulus_data(h5, stimulus_type='session')
+                save_stimulus_data(session_table, session_path)
+
+            # Get and save trial data
+            if do_trial:
+                stderr('  Saving trial table\n')
+                trial_table = get_stimulus_data(h5, stimulus_type='trial')
+                save_stimulus_data(trial_table, trial_path)
+
+            # Get and save event data
+            if do_event:
+                stderr('  Saving event table\n')
+                event_table = get_stimulus_data(h5)
+                save_stimulus_data(event_table, event_path)
 
             # Get and save langloc data
             if do_langloc:
                 stderr('  Saving LangLoc table\n')
                 langloc_table = get_langloc(h5)
-                save_stimuli(langloc_table, langloc_path)
+                save_stimulus_data(langloc_table, langloc_path)
 
             # Get and save raw signal
             if do_fif:
