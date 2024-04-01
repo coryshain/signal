@@ -50,8 +50,6 @@ function s = structify(s, d)
         s_.keys = s.keys;
         s_.values = s.values;
         s = s_;
-    elseif isobject(s)
-        s = structify(s, d+1);
     end
 end
 
