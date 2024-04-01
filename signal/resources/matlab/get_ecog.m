@@ -28,7 +28,7 @@ end
 
 
 function s = structify(s, d)
-    if ~exists('d', 'var')
+    if ~exist('d', 'var')
         d = 1
     end
 
