@@ -28,7 +28,6 @@ end
 
 
 function s = structify(s)
-    s
     if isstruct(s) && length(s) == 1
         names = fieldnames(s);
         for k=1:length(names)
