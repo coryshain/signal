@@ -27,15 +27,21 @@ function get_ecog_data(obj_path, out_path)
 end
 
 
-function s = structify(s)
+function s = structify(s, d)
+    if ~exists('d', 'var')
+        d = 1
+    end
+
+    d
+
     if isstruct(s) && length(s) == 1
         names = fieldnames(s);
         for k=1:length(names)
-            s.(names{k}) = structify(s.(names{k}));
+            s.(names{k}) = structify(s.(names{k}), d+1);
         end
     elseif iscell(s)
         for k=1:length(s)
-            s{k} = structify(s{k});
+            s{k} = structify(s{k}, d+1);
         end
     elseif istable(s)
         s = table2struct(s);
@@ -45,7 +51,7 @@ function s = structify(s)
         s_.values = s.values;
         s = s_;
     elseif isobject(s)
-        s = structify(s);
+        s = structify(s, d+1);
     end
 end
 

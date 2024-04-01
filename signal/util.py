@@ -75,3 +75,14 @@ def check_deps(path, dep_seq):
 
 
 RESOURCE_DIR = join(dirname(__file__), 'resources')
+
+
+def get_fif_suffix(path):
+    suffix = ''
+    if path.endswith('.fif'):
+        if path.endswith('_ieeg.fif'):
+            suffix = '_ieeg.fif'
+        else:
+            suffix = '.fif'
+
+    return suffix
