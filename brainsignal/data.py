@@ -63,12 +63,9 @@ def notch_filter(
 def set_reference(
         raw,
 ):
-    if 'ecog' in raw:
-        raw = raw.set_eeg_reference(ch_type='ecog', ref_channels="average")
-    if 'seeg' in raw:
-        raw = raw.set_eeg_reference(ch_type='seeg', ref_channels="average")
-    if 'eeg' in raw:
-        raw = raw.set_eeg_reference(ch_type='eeg', ref_channels="average")
+    for ch_type in ('ecog', 'seeg', 'eeg'):
+        if len(mne.pick_types(raw.info, exclude='bads', **{ch_type:True})):
+            raw = raw.set_eeg_reference(ch_type=ch_type, ref_channels="average")
 
     return raw
 
