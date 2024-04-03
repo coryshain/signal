@@ -48,14 +48,14 @@ def get_stimulus_table(
 
 
 def filter(raw, fmin=None, fmax=None):
-    return raw.filter(fmin, fmax)
+    return raw.filter(fmin, fmax, n_jobs=-1)
 
 
 def notch_filter(
         raw,
         freqs=60
 ):
-    raw = raw.notch_filter(freqs)
+    raw = raw.notch_filter(freqs, n_jobs=-1)
 
     return raw
 
@@ -74,7 +74,7 @@ def resample(
         raw,
         sfreq=100
 ):
-    return raw.resample(sfreq)
+    return raw.resample(sfreq, n_jobs=-1)
 
 
 def hilbert(raw):
@@ -82,7 +82,7 @@ def hilbert(raw):
 
 
 def zscore(raw):
-    return raw.apply_function(lambda x: (x - x.mean()) / x.std())
+    return raw.apply_function(lambda x: (x - x.mean()) / x.std(), n_jobs=-1)
 
 
 def epochs(
@@ -94,7 +94,7 @@ def epochs(
         duration=None,
         label_columns=None,
         picks=None,
-        baseline=(None, 0)
+        baseline=None
 ):
     stimulus_table = get_stimulus_table(stimulus_table_path, stimulus_type=stimulus_type)
     if stimulus_type == 'event':
