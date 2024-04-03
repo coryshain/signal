@@ -86,6 +86,8 @@ def get_stimulus_data(h5, stimulus_type='event'):
     elif stimulus_type == 'session':
         recording_end = h5['for_preproc']['elec_data_raw'].shape[-1] / freq
         session_onset = (np.array(h5['for_preproc']['stitch_index_raw']) - 1) / freq
+        if not len(session_onset.shape):
+            session_onset = session_onset[..., None]
         session_offset = np.concatenate([session_onset[:-1], [recording_end]])
         session_index = np.arange(len(session_onset)) + 1
         stimulus_data = pd.DataFrame(dict(
