@@ -1,6 +1,6 @@
 import os
 
-from signal.util import *
+from brainsignal.util import *
 
 LIB_ECOG_REPO_NAMES = [
     'ecog_pipeline_merged',

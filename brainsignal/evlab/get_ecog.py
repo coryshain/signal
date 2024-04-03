@@ -5,8 +5,8 @@ import numpy as np
 import pandas as pd
 import mne
 
-from signal.util import *
-from signal.evlab.initialize import initialize
+from brainsignal.util import *
+from brainsignal.evlab.initialize import initialize
 
 
 SUFFIX = '_crunched.mat'
@@ -173,9 +173,10 @@ def get_info(h5):
 
     # Bad channels
     bads = set()
-    for x in ('elec_ch_prelim_deselect', 'elec_ch_user_deselect'):
+    for x in ('elec_ch_prelim_deselect', 'elec_ch_user_deselect', 'elec_ch_with_IED'):
         if x in h5:
-            _bads = np.array(h5[x] - 1, dtype=int)
+            arr = h5[x]
+            _bads = np.array(arr - 1, dtype=int)
             if not _bads.shape:
                 _bads = _bads[..., None]
             for bad in _bads:
