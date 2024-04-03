@@ -81,8 +81,6 @@ if __name__ == '__main__':
     for _event_id in sorted(list(evoked.keys())):
         s = evoked[_event_id]
         s = np.concatenate(s, axis=0)
-        print(int(cfg['epochs']['pad_left_s'] * epochs.info['sfreq']))
-        print(s[:, 0:int(cfg['epochs']['pad_left_s'] * epochs.info['sfreq']) + 1].mean())
         m = s.mean(axis=0)
         e = data.sem(s, axis=0)
         plt.plot(times, m, label=_event_id)

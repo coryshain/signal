@@ -16,21 +16,22 @@ def get_picks(
         raw,
         langloc_path=None
 ):
+    pick_types_kwargs = dict(
+        meg=True,
+        eeg=True,
+        ecog=True,
+        seeg=True,
+        fnirs=True,
+        exclude='bads'
+    )
+    picks = set(mne.pick_types(raw.info, **pick_types_kwargs).tolist())
     if langloc_path:
         langloc = pd.read_csv(langloc_path)
         sel = langloc.s_vs_n_sig > 0
         ch_names = langloc[sel].channel.tolist()
-        picks = mne.pick_channels(ch_names, [], exclude=raw.info['bads'])
-    else:
-        pick_types_kwargs = dict(
-            meg=True,
-            eeg=True,
-            ecog=True,
-            seeg=True,
-            fnirs=True,
-            exclude='bads'
-        )
-        picks = mne.pick_types(raw.info, **pick_types_kwargs)
+        _picks = set(mne.pick_channels(ch_names, []).tolist())
+        picks &= _picks
+    picks = np.array(sorted(list(picks)))
 
     return picks
 
@@ -141,12 +142,12 @@ def epochs(
         tmin=tmin,
         tmax=tmax,
         picks=picks,
-        event_repeated='merge',
         baseline=baseline,
         preload=True
     )
 
     return epochs
+
 
 def sem(x, axis=None):
     num = np.std(x, axis=axis, ddof=1)
@@ -169,10 +170,7 @@ def rms(x, w=10):
 
 
 def run_preprocessing(raw, cfg, preprocessing_type='raw'):
-    if isinstance(cfg, dict):
-        cfg = cfg.get('preprocessing', cfg)
-    if isinstance(cfg, dict):
-        cfg = cfg.get(preprocessing_type, [])
+    cfg = cfg.get('preprocessing', {}).get(preprocessing_type, [])
     assert isinstance(cfg, list), 'cfg must be a list'
 
     for step in cfg:
