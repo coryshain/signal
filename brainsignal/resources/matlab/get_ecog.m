@@ -27,7 +27,7 @@ function get_ecog_data(obj_path, out_path)
 end
 
 
-function s = structify(s, d)
+function s = structify(s)
     if isstruct(s) && length(s) == 1
         names = fieldnames(s);
         for k=1:length(names)

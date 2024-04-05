@@ -174,19 +174,19 @@ def get_info(h5):
     channel_types = _channel_types.tolist()
 
     # Bad channels
-    bads = set()
+    goods = set(h5['elec_ch_clean']) & set(np.where(h5['elec_ch_valid'])[0].tolist())
+    bads = set(h5['elec_ch']) - goods
     for x in ('elec_ch_prelim_deselect', 'elec_ch_user_deselect', 'elec_ch_with_IED'):
         if x in h5:
-            arr = h5[x]
-            _bads = np.array(arr - 1, dtype=int)
-            if not _bads.shape:
-                _bads = _bads[..., None]
-            for bad in _bads:
-                bads.add(bad)
+            arr = np.array(h5[x])
+            if not len(arr.shape):
+                arr = arr[..., None]
+            arr = arr.tolist()
+            bads |= set(arr)
     misc = channel_ix[_channel_types == 'misc']
     for bad in misc:
         bads.add(bad)
-    bads = np.array([x for x in bads], dtype=int)
+    bads = np.sort(np.array([x for x in bads], dtype=int) - 1)
     bads = _channel_names[bads].tolist()
 
     # Sampling frequency

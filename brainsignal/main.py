@@ -50,6 +50,7 @@ if __name__ == '__main__':
         else:
             langloc_path = None
         picks = data.get_picks(raw, langloc_path=langloc_path)
+
         if not len(picks):
             stderr('No valid sensors found for file %s. Skipping.\n' % path)
             continue
@@ -67,18 +68,19 @@ if __name__ == '__main__':
         )
         epochs = data.run_preprocessing(epochs, cfg, preprocessing_type='epochs')
         epochs = epochs.apply_baseline(baseline=epochs_kwargs.get('baseline', (None, 0)))
-
-        for i, _event_id in enumerate(epochs.event_id):
+        event_id = sorted(list(epochs.event_id.keys()))
+        for i, _event_id in enumerate(event_id):
             if times is None:
                 times = epochs.times
-            s = epochs[_event_id].get_data(copy=False)
+            _evoked = epochs[_event_id]
+            s = _evoked.get_data(copy=False)
             t = s.shape[-1]
             s = s.reshape((-1, t))
             if _event_id not in evoked:
                 evoked[_event_id] = []
             evoked[_event_id].append(s)
 
-    for _event_id in sorted(list(evoked.keys())):
+    for _event_id in event_id:
         s = evoked[_event_id]
         s = np.concatenate(s, axis=0)
         m = s.mean(axis=0)
