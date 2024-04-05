@@ -102,6 +102,20 @@ def get_stimulus_data(h5, stimulus_type='event'):
     return stimulus_data
 
 
+def get_word_table(event_table_path):
+    stimulus_table = pd.read_csv(event_table_path)
+    word_table = stimulus_table[stimulus_table.key.str.startswith('word')]
+    word_table = word_table.rename(
+        dict(
+            event_onset='onset',
+            event_offset='offset',
+            event_duration='duration',
+        ),
+        axis=1
+    )
+    return word_table
+
+
 def get_langloc(h5):
     channel_ix = np.argsort(h5['elec_ch'])
     _channel_names = np.array(h5['elec_ch_label'])[channel_ix]
@@ -235,9 +249,6 @@ if __name__ == '__main__':
     mfile_path = join(dirname(dirname(__file__)), 'resources', 'matlab', 'get_ecog.m')
 
     for input_path in args.input_paths:
-        if not exists(input_path):
-            stderr('File %s does not exist, skipping.\n' % input_path)
-            continue
         stderr('Processing file %s\n' % input_path)
         name = basename(input_path)[:-len(SUFFIX)]
         output_path_base = join(output_dir, name)
@@ -289,7 +300,7 @@ if __name__ == '__main__':
         fif_stale = fif_mtime == 1
         do_fif = force_restart or (not fif_exists or fif_stale)
 
-        if do_session or do_trial or do_event or do_fif or do_langloc:
+        if do_session or do_trial or do_event or do_langloc or do_fif:
             # Get MATLAB data
             stderr('  Loading from MATLAB\n')
             h5 = get_matlab_data(h5_path)
@@ -323,3 +334,13 @@ if __name__ == '__main__':
                 stderr('  Saving signals (FIF)\n')
                 raw = get_raw(h5)
                 save_raw(raw, fif_path)
+
+        deps.append(event_path)
+        word_path = output_path_base + '_stim_word.csv'
+        word_mtime, word_exists = check_deps(word_path, deps)
+        word_stale = word_mtime == 1
+        do_word = force_restart or (not word_exists or word_stale)
+
+        if do_word:
+            word_table = get_word_table(event_path)
+            save_stimulus_data(word_table, word_path)

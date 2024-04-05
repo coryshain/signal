@@ -1,100 +1,120 @@
+import textwrap
 import argparse
 import numpy as np
 
-import mne
-from mne.baseline import rescale
-from mne.io import RawArray
-from mne.filter import filter_data
-from mne.time_frequency import tfr_stockwell, tfr_morlet, tfr_multitaper, morlet
-from mne.stats import bootstrap_confidence_interval
 from matplotlib import pyplot as plt
 
 from brainsignal.config import *
 from brainsignal.util import *
 from brainsignal import data
 
-BANDS = dict(
-    # delta=(1, 4),
-    theta=(4, 8),
-    alpha=(8, 12),
-    beta=(12, 35),
-    gamma=(35, 70),
-    # higamma=(70, 149),
-)
-
-def stat_fun(x):
-    """Return sum of squares."""
-    return np.sum(x ** 2, axis=0)
 
 if __name__ == '__main__':
-    argparser = argparse.ArgumentParser()
-    argparser.add_argument('cfg_path', help='Path to config (YAML) file.')
+    argparser = argparse.ArgumentParser(textwrap.dedent('''\
+        Extract preprocessed+epoched data as described in one or more brainsignal config (YAML) files.'''
+    ))
+    argparser.add_argument('cfg_paths', nargs='+', help='Path to config (YAML) file.')
     args = argparser.parse_args()
 
-    cfg_path = args.cfg_path
-    cfg = get_config(cfg_path)
+    cfg_paths = args.cfg_paths
+    for cfg_path in cfg_paths:
+        cfg = get_config(cfg_path)
 
-    output_dir = cfg.get('output_dir', 'plots')
+        output_dir = cfg['output_dir']
+        preprocessing = cfg.get('preprocessing', None)
+        epoching = cfg['epoching']
+        epoch_postprocessing = epoching.pop('postprocessing', None)
+        plot_dir = join(output_dir, 'plots')
 
-    times = None
-    evoked = {}
-    for path in cfg['data']:
-        suffix = get_fif_suffix(path)
-        path_base = path[:len(path) - len(suffix)]
+        event_id = None
+        epochs_list = []
+        for load_kwargs in cfg['data']:
+            load_kwargs['drop_bads'] = cfg.get('drop_bads', False)
+            load_kwargs['stimulus_type'] = cfg.get('stimulus_type', None)
+            load_kwargs['channel_mask'] = load_kwargs.get('channel_mask', cfg.get('channel_mask', None))
 
-        fif_path = path
-        raw = data.get_raw(fif_path)
+            raw, stimulus_table, good_channels = data.load_subject(**load_kwargs)
+            picks = data.get_picks(raw, good_channels=good_channels)
 
-        if cfg.get('lang_only', True):
-            langloc_path = path_base + '_langloc.csv'
-        else:
-            langloc_path = None
-        picks = data.get_picks(raw, langloc_path=langloc_path)
+            if not len(picks):
+                stderr('No valid sensors found for file %s. Skipping.\n' % load_kwargs['fif'])
+                continue
 
-        if not len(picks):
-            stderr('No valid sensors found for file %s. Skipping.\n' % path)
-            continue
+            raw = data.process_signal(raw, preprocessing)
 
-        raw = data.run_preprocessing(raw, cfg, preprocessing_type='raw')
+            epochs = data.get_epochs(
+                raw,
+                stimulus_table,
+                picks=picks,
+                **epoching
+            )
 
-        epochs_kwargs = cfg.get('epochs', {})
-        stimulus_type = epochs_kwargs.get('stimulus_type', 'event')
-        stimulus_table_path = path_base + f'_stim_{stimulus_type}.csv'
-        epochs = data.epochs(
-            raw,
-            stimulus_table_path,
-            picks=picks,
-            **epochs_kwargs
-        )
-        epochs = data.run_preprocessing(epochs, cfg, preprocessing_type='epochs')
-        epochs = epochs.apply_baseline(baseline=epochs_kwargs.get('baseline', (None, 0)))
-        event_id = sorted(list(epochs.event_id.keys()))
-        for i, _event_id in enumerate(event_id):
-            if times is None:
-                times = epochs.times
-            _evoked = epochs[_event_id]
-            s = _evoked.get_data(copy=False)
-            t = s.shape[-1]
-            s = s.reshape((-1, t))
-            if _event_id not in evoked:
-                evoked[_event_id] = []
-            evoked[_event_id].append(s)
+            if event_id is None:
+                event_id = epochs.event_id.copy()
+            else:
+                assert event_id == epochs.event_id, ('Mismatch between event_id dictionaries. Got %s and %s.' %
+                                                     (event_id, epochs.event_id))
+            epochs = data.process_signal(epochs, epoch_postprocessing)
+            epochs = epochs.apply_baseline(baseline=epoching.get('baseline', (None, 0)))
+            epochs_list.append(epochs)
 
-    for _event_id in event_id:
-        s = evoked[_event_id]
-        s = np.concatenate(s, axis=0)
-        m = s.mean(axis=0)
-        e = data.sem(s, axis=0)
-        plt.plot(times, m, label=_event_id)
-        plt.fill_between(times, m-e, m+e, alpha=0.1)
+            if epoching.get('dump', False):
+                fif = load_kwargs['fif']
+                suffix = get_fif_suffix(fif)
+                subject = basename(fif[:len(fif) - len(suffix)])
+                save_dir = join(output_dir, 'epochs')
+                epochs_path = data.save_epochs(
+                    epochs,
+                    save_dir,
+                    subject
+                )
 
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
+        times = None
+        evoked = {}
+        for _event_id in sorted(list(event_id.keys())):
+            _event_id_parsed = _event_id.split(data.GROUPBY_SEP)
+            if len(_event_id_parsed) == 1:
+                group = None
+                _event_id_lab = _event_id
+            else:
+                group, _event_id_lab = _event_id_parsed
 
-    plt.legend()
-    plt.gcf().set_size_inches(7, 5)
-    plt.gca().spines['top'].set_visible(False)
-    plt.gca().spines['right'].set_visible(False)
-    plt.axhline(0., c='k')
-    plt.axvline(0., c='k', ls='dotted')
-    plt.savefig(join(output_dir, 'evoked.png'), dpi=300)
+            if group not in evoked:
+                evoked[group] = {}
+            if _event_id_lab not in evoked[group]:
+                evoked[group][_event_id_lab] = []
+
+            for epochs in epochs_list:
+                if times is None:
+                    times = epochs.times
+                s = epochs[_event_id].get_data(copy=False)
+                t = s.shape[-1]
+                s = s.reshape((-1, t))
+                evoked[group][_event_id_lab].append(s)
+
+            evoked[group][_event_id_lab] = np.concatenate(evoked[group][_event_id_lab], axis=0)
+
+        if not os.path.exists(plot_dir):
+            os.makedirs(plot_dir)
+
+        for group in evoked:
+            plt.close('all')
+            for _event_id in evoked[group]:
+                plot_name = 'evoked'
+                if group is not None:
+                    plot_name += '_' + group
+                plot_name += '.png'
+
+                s = evoked[group][_event_id]
+                m = s.mean(axis=0)
+                e = data.sem(s, axis=0)
+                plt.plot(times, m, label=_event_id)
+                plt.fill_between(times, m - e, m + e, alpha=0.1)
+
+            plt.legend()
+            plt.gcf().set_size_inches(7, 5)
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            plt.axhline(0., c='k')
+            plt.axvline(0., c='k', ls='dotted')
+            plt.savefig(join(plot_dir, plot_name), dpi=300)
