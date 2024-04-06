@@ -269,6 +269,7 @@ if __name__ == '__main__':
 
     mfile_path = join(dirname(dirname(__file__)), 'resources', 'matlab', 'get_ecog.m')
 
+    input_path = None
     for input_path in args.input_paths:
         stderr('Processing file %s\n' % input_path)
         name = basename(input_path)[:-len(SUFFIX)]
@@ -365,3 +366,6 @@ if __name__ == '__main__':
         if do_word:
             word_table = get_word_table(event_path)
             save_stimulus_data(word_table, word_path)
+
+    if input_path is not None:
+        get_channel_masks(dirname(input_path))
