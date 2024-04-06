@@ -231,6 +231,7 @@ def save_raw(raw, output_path):
 
 def get_channel_masks(langloc_dir):
     mask_dir = join(dirname(dirname(__file__)), 'resources', 'masks')
+    print(langloc_dir)
     print(mask_dir)
     suffix_in = '_langloc.csv'
     suffix_out = '_channel_mask.csv'
