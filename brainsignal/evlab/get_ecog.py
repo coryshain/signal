@@ -231,8 +231,6 @@ def save_raw(raw, output_path):
 
 def get_channel_masks(langloc_dir, overwrite=False):
     mask_dir = join(dirname(dirname(__file__)), 'resources', 'masks')
-    print(langloc_dir)
-    print(mask_dir)
     suffix_in = '_langloc.csv'
     suffix_out = '_channel_mask.csv'
     keyword = '_MITLangloc'
@@ -240,13 +238,12 @@ def get_channel_masks(langloc_dir, overwrite=False):
         for filename in [x for x in os.listdir(langloc_dir) if (keyword in x and x.endswith(suffix_in))]:
             subject = filename[:-len(suffix_in)].replace(keyword, '')
             path = join(langloc_dir, filename)
-            channel_mask = pd.read_csv(path)[['channel', 's_vs_n_sig']].rename(dict(s_vs_n_sig='include'))
+            channel_mask = pd.read_csv(path)[['channel', 's_vs_n_sig']].rename(dict(s_vs_n_sig='include'), axis=1)
             if not os.path.exists(mask_dir):
                 os.makedirs(mask_dir)
             out_path = join(mask_dir, subject + suffix_out)
             if overwrite or not os.path.exists(out_path):
-                channel_mask.to_csv(out_path)
-                print(out_path)
+                channel_mask.to_csv(out_path, index=False)
     else:
         stderr('langloc_dir %s does not exist, skipping channel mask extraction' % langloc_dir)
 
