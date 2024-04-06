@@ -229,6 +229,27 @@ def save_raw(raw, output_path):
     raw.save(output_path, overwrite=True)
 
 
+def get_channel_masks(langloc_dir):
+    mask_dir = join(dirname(dirname(__file__)), 'resources', 'masks')
+    print(mask_dir)
+    suffix_in = '_langloc.csv'
+    suffix_out = '_channel_mask.csv'
+    keyword = '_MITLangloc'
+    if os.path.exists(langloc_dir):
+        for filename in [x for x in os.listdir(langloc_dir) if (keyword in x and x.endswith(suffix_in))]:
+            subject = filename[:-len(suffix_in)].replace(keyword, '')
+            path = join(langloc_dir, filename)
+            channel_mask = pd.read_csv(path)[['channel', 's_vs_n_sig']].rename(dict(s_vs_n_sig='include'))
+            if not os.path.exists(mask_dir):
+                os.makedirs(mask_dir)
+            out_path = join(mask_dir, subject + suffix_out)
+            channel_mask.to_csv(out_path)
+            print(out_path)
+    else:
+        stderr('langloc_dir %s does not exist, skipping channel mask extraction' % langloc_dir)
+
+
+
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(textwrap.dedent('''\
         Convert MATLAB objects from EvLab ECoG pipeline to HDF5 (brain data) and CSV (stimuli).'''
