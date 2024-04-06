@@ -229,7 +229,7 @@ def save_raw(raw, output_path):
     raw.save(output_path, overwrite=True)
 
 
-def get_channel_masks(langloc_dir):
+def get_channel_masks(langloc_dir, overwrite=False):
     mask_dir = join(dirname(dirname(__file__)), 'resources', 'masks')
     print(langloc_dir)
     print(mask_dir)
@@ -244,8 +244,9 @@ def get_channel_masks(langloc_dir):
             if not os.path.exists(mask_dir):
                 os.makedirs(mask_dir)
             out_path = join(mask_dir, subject + suffix_out)
-            channel_mask.to_csv(out_path)
-            print(out_path)
+            if overwrite or not os.path.exists(out_path):
+                channel_mask.to_csv(out_path)
+                print(out_path)
     else:
         stderr('langloc_dir %s does not exist, skipping channel mask extraction' % langloc_dir)
 
@@ -369,4 +370,4 @@ if __name__ == '__main__':
             save_stimulus_data(word_table, word_path)
 
     if input_path is not None:
-        get_channel_masks(dirname(input_path))
+        get_channel_masks(output_dir, overwrite=force_restart)
