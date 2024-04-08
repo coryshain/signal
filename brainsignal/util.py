@@ -1,6 +1,8 @@
 import sys
 import os
 
+from brainsignal.constants import *
+
 
 def stderr(s):
     sys.stderr.write(s)
@@ -29,6 +31,39 @@ def exists(path):
     path = os.path.normpath(path)
 
     return os.path.exists(path)
+
+
+def get_path(output_dir, path_type, action_type, action_id, subject=None):
+    assert action_type in PATHS, 'Unrecognized action_type %s' % action_type
+    assert path_type in PATHS[action_type], 'Unrecognized path_type %s for action_type %s' % (path_type, action_type)
+    path = PATHS[action_type][path_type]
+
+    if '%s' in path and subject is not None:
+        path = path % subject
+
+    if path_type == 'subdir':
+        suffix = join(path, action_id)
+    else:
+        prefix = PATHS[action_type]['subdir']
+        suffix = join(prefix, action_id, path)
+
+    path = join(output_dir, suffix)
+
+    return path
+
+
+def infer_stimulus_table_path_from_raw(
+        stimulus_type=None,
+        raw_path=None
+):
+    assert raw_path is not None, 'Either a stimulus path or a FIF path must be provided'
+    suffix = get_fif_suffix(raw_path)
+    if stimulus_type is None:
+        stimulus_type = 'event'
+    path_base = raw_path[:len(raw_path) - len(suffix)]
+    stimulus_table_path = path_base + f'_stim_{stimulus_type}.csv'
+
+    return stimulus_table_path
 
 
 def getmtime(path):
@@ -77,12 +112,32 @@ def check_deps(path, dep_seq):
 RESOURCE_DIR = join(dirname(__file__), 'resources')
 
 
+def get_overwrite(overwrite):
+    if isinstance(overwrite, dict):
+        return overwrite
+
+    out = dict(
+        preprocess=False,
+        epoch=False,
+        plot=False,
+    )
+    if overwrite is None:
+        for x in out:
+            out[x] = True
+    elif isinstance(overwrite, str):
+        out[overwrite] = True
+    elif overwrite is False:
+        pass
+    else:
+        raise ValueError('Unrecognized value for overwrite: %s' % overwrite)
+
+    return out
+
+
 def get_fif_suffix(path):
     suffix = ''
-    if path.endswith('.fif'):
-        if path.endswith('_ieeg.fif'):
-            suffix = '_ieeg.fif'
-        else:
-            suffix = '.fif'
+    for _suffix in MNE_SUFFIXES:
+        if path.endswith(_suffix):
+            return _suffix
 
     return suffix

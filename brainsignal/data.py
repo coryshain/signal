@@ -10,51 +10,67 @@ GROUPBY_SEP = '||'
 GROUP_SEP = '-'
 
 
-def load_subject(
-        fif,
-        stimulus=None,
-        channel_mask=None,
-        stimulus_type=None,
-        drop_bads=False
+def load_raw(
+        fif_path,
+        channel_mask_path=None
 ):
-    raw = get_raw(fif)
+    raw = get_raw(fif_path)
+    suffix = get_fif_suffix(fif_path)
+    subject = basename(fif_path[:len(fif_path) - len(suffix)])
 
-    suffix = get_fif_suffix(fif)
-    subject = basename(fif[:len(fif) - len(suffix)])
+    if channel_mask_path is not None:
+        if channel_mask_path == 'auto':
+            mask_suffix = '_channel_mask.csv'
+            mask_map = {}
+            mask_dir = join(dirname(__file__), 'resources', 'masks')
+            if os.path.exists(mask_dir):
+                for mask_file in os.listdir(mask_dir):
+                    if mask_file.endswith(mask_suffix):
+                        prefix = mask_file[:-len(mask_suffix)]
+                        mask_map[prefix] = join(mask_dir, mask_file)
+                for prefix in mask_map:
+                    if subject.startswith(prefix):
+                        channel_mask_path = mask_map[prefix]
+            else:
+                channel_mask_path = None
+        else:
+            assert os.path.exists(channel_mask_path), 'Channel mask %s not found.' % channel_mask_path
 
-    if stimulus is None:
-        if stimulus_type is None:
-            stimulus_type = 'event'
-        path_base = fif[:len(fif) - len(suffix)]
-        stimulus = path_base + f'_stim_{stimulus_type}.csv'
-    stimulus_table = get_stimulus_table(stimulus, stimulus_type=stimulus_type)
-
-    if channel_mask is None:
-        path_base = fif[:len(fif) - len(suffix)]
-        channel_mask = path_base + '_channel_mask.csv'
+    if channel_mask_path is not None and os.path.exists(channel_mask_path):
+        if channel_mask_path == 'all':
+            channels_to_drop = raw.info['ch_names']
+        else:
+            channel_mask = pd.read_csv(channel_mask_path)
+            include = channel_mask.include.astype(bool)
+            drop = ~include
+            channels_to_drop = channel_mask.channel.values[drop].tolist()
+        raw.info['temp'] = dict(channels_to_drop=channels_to_drop)
     else:
-        assert os.path.exists(channel_mask), 'Channel mask %s not found.' % channel_mask
+        raw.info['temp'] = dict(channels_to_drop=None)
 
-    masked_channels = set()
-    if os.path.exists(channel_mask):
-        channel_mask = pd.read_csv(channel_mask)
-        include = channel_mask.include.astype(bool)
-        drop = ~include
-        masked_channels |= set(channel_mask.channel.values[drop].tolist())
+    set_subject(raw, subject)
 
-    bads = set(raw.info['bads'])
-    masked_channels |= bads
-    masked_channels = sorted(list(set(masked_channels)))
+    return raw
 
-    if drop_bads:
-        raw = raw.drop_channels(masked_channels, on_missing='ignore')
 
-    raw = raw.rename_channels(lambda x, subject=subject: '%s, %s' % (subject, x))
-    good_channels = [x for x in raw.info['ch_names'] if x not in masked_channels]
+def load_stimulus_table(
+    stimulus_table_path,
+    stimulus_type=None,
+):
+    if stimulus_type is None:
+        stimulus_type = 'event'
+    stimulus_table = pd.read_csv(stimulus_table_path)
+    if 'onset' not in stimulus_table:
+        assert '%s_onset' % stimulus_type in stimulus_table, ('Stimulus table for type "%s" must contain a column '
+            'called either "onset" or "%s_onset"' % (stimulus_type, stimulus_type))
+        stimulus_table['onset'] = stimulus_table['%s_onset' % stimulus_type].values
+    if 'offset' not in stimulus_table:
+        assert '%s_offset' % stimulus_type in stimulus_table, ('Stimulus table for type "%s" must contain a column '
+            'called either "offset" or "%s_offset"' % (stimulus_type, stimulus_type))
+        stimulus_table['offset'] = stimulus_table['%s_offset' % stimulus_type].values
+    stimulus_table['duration'] = stimulus_table.offset - stimulus_table.offset
 
-    print(raw._data.shape)
-
-    return raw, stimulus_table, good_channels
+    return stimulus_table
 
 
 def get_raw(
@@ -64,24 +80,6 @@ def get_raw(
     raw = raw.crop(raw.times.min(), raw.times.max())
 
     return raw
-
-
-def get_stimulus_table(
-        stimulus_table_path,
-        stimulus_type='event'
-):
-    stimulus_table = pd.read_csv(stimulus_table_path)
-    if 'onset' not in stimulus_table:
-        assert '%s_onset' % stimulus_type in stimulus_table, ('Stimulus table for type "%s" must contain a column '
-            'called either "onset" or "%s_onset"' % stimulus_type)
-        stimulus_table['onset'] = stimulus_table['%s_onset' % stimulus_type].values
-    if 'offset' not in stimulus_table:
-        assert '%s_offset' % stimulus_type in stimulus_table, ('Stimulus table for type "%s" must contain a column '
-            'called either "offset" or "%s_offset"' % stimulus_type)
-        stimulus_table['offset'] = stimulus_table['%s_offset' % stimulus_type].values
-    stimulus_table['duration'] = stimulus_table.offset - stimulus_table.offset
-
-    return stimulus_table
 
 
 def get_picks(
@@ -111,8 +109,6 @@ def get_epochs(
         pad_left_s=0.1,
         pad_right_s=0.,
         duration=None,
-        label_columns=None,
-        groupby_columns=None,
         picks=None,
         baseline=None
 ):
@@ -130,69 +126,135 @@ def get_epochs(
     event_times = stimulus_table['onset'].values
     event_times = np.round(event_times * raw.info['sfreq']).astype(int)
     events[:, 0] = event_times
-
-    # Get event labels
-    if label_columns is None:
-        label_columns = ['condition']
-    elif not isinstance(label_columns, list):
-        label_columns = [label_columns]
-    label = None
-    for label_column in label_columns:
-        if label is None:
-            label = stimulus_table[label_column].astype(str)
-        else:
-            label += '_' + stimulus_table[label_column].astype(str)
-    assert label is not None, 'At least one label column must be provided'
-    if groupby_columns is not None:
-        if isinstance(groupby_columns, str):
-            groupby_columns = [groupby_columns]
-        assert isinstance(groupby_columns, list), 'groupby_columns must be None, a string, or a list'
-        groupby_label = None
-        for groupby_column in groupby_columns:
-            _groupby_label = ('%s=' % groupby_column) + stimulus_table[groupby_column].astype(str)
-            if groupby_label is None:
-                groupby_label = _groupby_label
-            else:
-                groupby_label += GROUP_SEP + _groupby_label
-        label = groupby_label + GROUPBY_SEP + label
-    ix2label = sorted(label.unique().tolist())
-    label_indices = np.arange(1, len(ix2label) + 1)
-    event_id = {x: i for i, x in zip(label_indices, ix2label)}
-    label = label.map(event_id)
-    events[:, 2] = label.values
+    events[:, 2] = stimulus_table.index.values
 
     # Construct epochs
     epochs = mne.Epochs(
         raw,
         events,
-        event_id=event_id,
+        # event_id=event_id,
         tmin=tmin,
         tmax=tmax,
         picks=picks,
         baseline=baseline,
         preload=True
     )
+    set_stimulus_table(epochs, stimulus_table)
 
     return epochs
 
 
-def save_epochs(
+def get_epochs_data_by_indices(
         epochs,
-        save_dir,
-        filename_base,
+        indices
 ):
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-    path = join(save_dir, filename_base + '-epo.fif')
-    epochs.save(path, overwrite=True)
+    s = epochs[indices].get_data(copy=False)
+    t = s.shape[-1]
+    s = s.reshape((-1, t))
 
-    return path
+    return s
+
+
+def get_epoch_indices_by_label(
+        epochs,
+        label_columns=None,
+        stimulus_table=None
+):
+    if label_columns is None:
+        label_columns = ['condition']
+    if stimulus_table is None:
+        stimulus_table = get_stimulus_table(epochs)
+    elif not isinstance(label_columns, list):
+        label_columns = [label_columns]
+    labels = None
+    for label_column in label_columns:
+        if labels is None:
+            labels = stimulus_table[label_column].astype(str)
+        else:
+            labels += '_' + stimulus_table[label_column].astype(str)
+    assert labels is not None, 'At least one label column must be provided'
+    label_set = sorted(labels.unique().tolist())
+    indices_by_label = {x: labels[labels == x].index.astype(str).tolist() for x in label_set}
+
+    return indices_by_label
+
+
+def get_evoked(
+        paths,
+        label_columns=None,
+        groupby_columns=None
+):
+    evoked = {}
+    times = None
+    if not isinstance(groupby_columns, list):
+        groupby_columns = [groupby_columns]
+    for i, path in enumerate(paths):
+        epochs = load_epochs(path)
+        if times is None:
+            times = epochs.times
+        else:
+            assert np.allclose(times, epochs.times), 'Mismatched epoch times at epoch index %d' % i
+        stimulus_table = get_stimulus_table(epochs)
+        if groupby_columns != [None]:
+            gb_iter = stimulus_table.groupby(groupby_columns)
+        else:
+            gb_iter = zip([None], [stimulus_table])
+        for key, _stimulus_table in gb_iter:
+            if key is not None:
+                if len(groupby_columns) == 1:
+                    key = [key]
+                key = '_'.join(['%s-%s' % (x, y) for x, y in zip(groupby_columns, key)])
+            indices_by_label = get_epoch_indices_by_label(
+                epochs,
+                label_columns=label_columns,
+                stimulus_table=_stimulus_table
+            )
+            if key not in evoked:
+                evoked[key] = {}
+            for label in indices_by_label:
+                _evoked = get_epochs_data_by_indices(
+                    epochs,
+                    indices_by_label[label]
+                )
+                if label not in evoked[key]:
+                    evoked[key][label] = []
+                evoked[key][label].append(_evoked)
+    for key in evoked:
+        for label in evoked[key]:
+            evoked[key][label] = np.concatenate(evoked[key][label], axis=0)
+
+    assert times is not None, 'At least one epochs file must be provided'
+
+    return evoked, times
+
 
 
 def load_epochs(
         path
 ):
     return mne.read_epochs(path, preload=True)
+
+
+def get_subject(inst):
+    return inst.info['subject_info']['his_id']
+
+
+def set_subject(inst, val):
+    if inst.info['subject_info'] is None:
+        inst.info['subject_info'] = {}
+    inst.info['subject_info']['his_id'] = val
+
+    return inst
+
+
+def get_stimulus_table(epochs):
+    return pd.read_json(epochs.info['description'])
+
+
+def set_stimulus_table(epochs, stimulus_table):
+    epochs.info['description'] = stimulus_table.to_json()
+
+    return epochs
 
 
 def process_signal(inst, steps):
@@ -215,6 +277,42 @@ def process_signal(inst, steps):
         inst = f(inst, **kwargs)
 
     return inst
+
+
+
+
+
+
+
+
+
+
+
+
+######################################
+#
+#  PREPROCESSING STEPS
+#
+######################################
+
+
+def drop_bad_channels(
+        raw
+):
+    return raw.drop_channels(raw.info['bads'], on_missing='ignore')
+
+
+def drop_masked_channels(
+        raw
+):
+    channels_to_drop = raw.info.get('temp', {}).get('channels_to_drop', None)
+    subject = get_subject(raw)
+    assert channels_to_drop is not None, ('drop_masked_channels called on subject %s with no masked channels. '
+        'Either remove this step from the preprocessing or add a mask for this subject.' % subject)
+
+    raw.drop_channels(channels_to_drop, on_missing='ignore')
+
+    return raw
 
 
 def filter(

@@ -1,120 +1,120 @@
 import textwrap
 import argparse
 import numpy as np
+import pandas as pd
 
 from matplotlib import pyplot as plt
 
 from brainsignal.config import *
 from brainsignal.util import *
 from brainsignal import data
+from brainsignal import pipeline
 
 
 if __name__ == '__main__':
     argparser = argparse.ArgumentParser(textwrap.dedent('''\
         Extract preprocessed+epoched data as described in one or more brainsignal config (YAML) files.'''
     ))
-    argparser.add_argument('cfg_paths', nargs='+', help='Path to config (YAML) file.')
+    argparser.add_argument('cfg_paths', nargs='+', help='Path(s) to config (YAML) file(s).')
+    argparser.add_argument('-o', '--overwrite', nargs='?', default=False, help=textwrap.dedent('''\
+        Whether to overwrite existing results. If ``False``, will only estimate missing results, leaving old 
+        ones in place.
+        
+        NOTE 1: For safety reasons, brainsignal never deletes files or directories, so ``overwrite``
+        will clobber any existing files that need to be rebuilt, but it will leave any other older files in place.
+        As a result, the output directory may contain a mix of old and new files. To avoid this, you must delete
+        existing directories yourself.
+        
+        NOTE 2: To ensure correctness of all files, brainsignal contains built-in Make-like dependency checking that
+        forces a rebuild for all files downstream from a change. For example, if a preprocessed file is modified, then
+        all subsequent actions will be re-run as well (to avoid stale results obtained using missing or modified 
+        prerequisites). These dependency-based rebuilds will trigger *even if overwrite is False*, since keeping
+        stale results is never correct behavior.\
+        '''
+    ))
     args = argparser.parse_args()
+    overwrite = get_overwrite(args.overwrite)
 
     cfg_paths = args.cfg_paths
     for cfg_path in cfg_paths:
         cfg = get_config(cfg_path)
-
         output_dir = cfg['output_dir']
-        preprocessing = cfg.get('preprocessing', None)
-        epoching = cfg['epoching']
-        epoch_postprocessing = epoching.pop('postprocessing', None)
-        plot_dir = join(output_dir, 'plots')
+        action_sequence = get_action_sequence(cfg)
+        deps = [[]]
 
-        event_id = None
-        epochs_list = []
-        for load_kwargs in cfg['data']:
-            load_kwargs['drop_bads'] = cfg.get('drop_bads', False)
-            load_kwargs['stimulus_type'] = cfg.get('stimulus_type', None)
-            load_kwargs['channel_mask'] = load_kwargs.get('channel_mask', cfg.get('channel_mask', None))
+        for data_info in get_data_info(cfg):
+            fif_path = data_info['fif']
+            suffix = get_fif_suffix(fif_path)
+            subject = basename(fif_path[:len(fif_path) - len(suffix)])
 
-            raw, stimulus_table, good_channels = data.load_subject(**load_kwargs)
-            picks = data.get_picks(raw, good_channels=good_channels)
+            _deps = [fif_path]
+            deps[-1].append(fif_path)
 
-            if not len(picks):
-                stderr('No valid sensors found for file %s. Skipping.\n' % load_kwargs['fif'])
+            for action in action_sequence:
+                action_type = action['type']
+                if action_type not in ('preprocess', 'epoch'):
+                    continue
+                action_kwargs = action['kwargs']
+                action_id = action['id']
+                output_path = get_path(output_dir, 'output', action_type, action_id, subject=subject)
+                mtime, exists = check_deps(output_path, _deps)
+                stale = mtime == 1
+                if overwrite[action_type] or stale or not exists:
+                    do_action = True
+                else:
+                    do_action = False
+
+                if do_action:
+                    if action_type == 'preprocess':
+                        raw = pipeline.preprocess(
+                            cfg['output_dir'],
+                            fif_path=data_info['fif'],
+                            channel_mask_path=data_info['channel_mask_path'],
+                            **action_kwargs
+                        )
+
+                    elif action_type == 'epoch':
+                        stimulus_table_path = data_info.get(
+                            'stimulus_table',
+                            infer_stimulus_table_path_from_raw(
+                                raw_path=data_info['fif'],
+                                stimulus_type=action_kwargs.get('stimulus_type', 'event')
+                            )
+                        )
+
+                        epochs = pipeline.epoch(
+                            output_dir,
+                            subject,
+                            stimulus_table_path=stimulus_table_path,
+                            **action_kwargs
+                        )
+                else:
+                    stderr('%s exists for subject %s. Skipping. To force re-run, run with overwrite=True.\n' %
+                           (ACTION_VERB_TO_NOUN[action_type], subject))
+
+                _deps.append(output_path)
+                deps[-1].append(output_path)
+
+        for action in action_sequence:
+            action_type = action['type']
+            if action_type not in ('plot',):
                 continue
-
-            raw = data.process_signal(raw, preprocessing)
-
-            epochs = data.get_epochs(
-                raw,
-                stimulus_table,
-                picks=picks,
-                **epoching
-            )
-
-            if event_id is None:
-                event_id = epochs.event_id.copy()
+            action_kwargs = action['kwargs']
+            action_id = action['id']
+            output_path = get_path(output_dir, 'output', action_type, action_id)
+            mtime, exists = check_deps(output_path, deps)
+            stale = mtime == 1
+            if overwrite[action_type] or stale or not exists:
+                do_action = True
             else:
-                assert event_id == epochs.event_id, ('Mismatch between event_id dictionaries. Got %s and %s.' %
-                                                     (event_id, epochs.event_id))
-            epochs = data.process_signal(epochs, epoch_postprocessing)
-            epochs = epochs.apply_baseline(baseline=epoching.get('baseline', (None, 0)))
-            epochs_list.append(epochs)
+                do_action = False
 
-            if epoching.get('dump', False):
-                fif = load_kwargs['fif']
-                suffix = get_fif_suffix(fif)
-                subject = basename(fif[:len(fif) - len(suffix)])
-                save_dir = join(output_dir, 'epochs')
-                epochs_path = data.save_epochs(
-                    epochs,
-                    save_dir,
-                    subject
-                )
-
-        times = None
-        evoked = {}
-        for _event_id in sorted(list(event_id.keys())):
-            _event_id_parsed = _event_id.split(data.GROUPBY_SEP)
-            if len(_event_id_parsed) == 1:
-                group = None
-                _event_id_lab = _event_id
+            if do_action:
+                if action_type == 'plot':
+                    pipeline.plot(
+                        output_dir,
+                        **action_kwargs
+                    )
             else:
-                group, _event_id_lab = _event_id_parsed
-
-            if group not in evoked:
-                evoked[group] = {}
-            if _event_id_lab not in evoked[group]:
-                evoked[group][_event_id_lab] = []
-
-            for epochs in epochs_list:
-                if times is None:
-                    times = epochs.times
-                s = epochs[_event_id].get_data(copy=False)
-                t = s.shape[-1]
-                s = s.reshape((-1, t))
-                evoked[group][_event_id_lab].append(s)
-
-            evoked[group][_event_id_lab] = np.concatenate(evoked[group][_event_id_lab], axis=0)
-
-        if not os.path.exists(plot_dir):
-            os.makedirs(plot_dir)
-
-        for group in evoked:
-            plt.close('all')
-            for _event_id in evoked[group]:
-                plot_name = 'evoked'
-                if group is not None:
-                    plot_name += '_' + group
-                plot_name += '.png'
-
-                s = evoked[group][_event_id]
-                m = s.mean(axis=0)
-                e = data.sem(s, axis=0)
-                plt.plot(times, m, label=_event_id)
-                plt.fill_between(times, m - e, m + e, alpha=0.1)
-
-            plt.legend()
-            plt.gcf().set_size_inches(7, 5)
-            plt.gca().spines['top'].set_visible(False)
-            plt.gca().spines['right'].set_visible(False)
-            plt.axhline(0., c='k')
-            plt.axvline(0., c='k', ls='dotted')
-            plt.savefig(join(plot_dir, plot_name), dpi=300)
+                stderr('%s exists. Skipping. To force re-run, run with overwrite=True.\n' %
+                       ACTION_VERB_TO_NOUN[action_type])
