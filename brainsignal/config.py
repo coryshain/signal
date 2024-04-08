@@ -71,7 +71,7 @@ def get_action_sequence(
     if dep_action_type is None:
         return action_sequence
 
-    dep_action_id = cfg[action_type][action_id].get('%s_id' % dep_action_type, None)
+    dep_action_id = cfg[action_type][action_id].get('%s_id' % ACTION_VERB_TO_NOUN[dep_action_type], None)
     return get_action_sequence(
         cfg,
         action_type=dep_action_type,
