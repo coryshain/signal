@@ -16,6 +16,10 @@ if __name__ == '__main__':
         Extract preprocessed+epoched data as described in one or more brainsignal config (YAML) files.'''
     ))
     argparser.add_argument('cfg_paths', nargs='+', help='Path(s) to config (YAML) file(s).')
+    argparser.add_argument('-t', '--action_type', default=None, help=textwrap.dedent('''\
+        Action type to run (e.g., "preprocess" or "plot"). All missing/stale dependencies will be run as well. If
+        None, run the last action defined in the config.'''
+    ))
     argparser.add_argument('-i', '--action_ids', nargs='+', default=None, help=textwrap.dedent('''\
         IDs to run for final action_type in the pipeline (e.g. plotting_id). If None, defaults to first ID in list.'''
     ))
@@ -36,6 +40,7 @@ if __name__ == '__main__':
         '''
     ))
     args = argparser.parse_args()
+    action_type_top = args.action_type
     action_ids = args.action_ids
     overwrite = get_overwrite(args.overwrite)
 
@@ -44,9 +49,14 @@ if __name__ == '__main__':
         cfg = get_config(cfg_path)
         output_dir = cfg['output_dir']
         if action_ids is not None:
-            action_sequences = [get_action_sequence(cfg, action_id=action_id) for action_id in action_ids]
+            action_sequences = [
+                get_action_sequence(
+                    cfg,
+                    action_type=action_type_top,
+                    action_id=action_id
+                ) for action_id in action_ids]
         else:
-            action_sequences = [get_action_sequence(cfg)]
+            action_sequences = [get_action_sequence(cfg, action_type=action_type_top)]
         for action_sequence in action_sequences:
             deps = [[]]
             for data_info in get_data_info(cfg):
