@@ -101,7 +101,7 @@ def plot(
         label_columns=None,
         groupby_columns=None,
 ):
-    plotting_dir = get_path(output_dir, 'subdir', 'plot', epoching_id)
+    plotting_dir = get_path(output_dir, 'subdir', 'plot', plotting_id)
     if not os.path.exists(plotting_dir):
         os.makedirs(plotting_dir)
     kwargs = dict(
