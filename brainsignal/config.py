@@ -19,7 +19,7 @@ def get_data_info(cfg):
     for _load_kwargs in cfg.get('data'):
         _load_kwargs['drop_bads'] = cfg.get('drop_bads', False)
         _load_kwargs['stimulus_type'] = cfg.get('stimulus_type', None)
-        _load_kwargs['channel_mask_path'] = _load_kwargs.get('channel_mask', cfg.get('channel_mask', None))
+        _load_kwargs['channel_mask_path'] = _load_kwargs.get('channel_mask_path', cfg.get('channel_mask_path', None))
         load_kwargs.append(_load_kwargs)
 
     return load_kwargs

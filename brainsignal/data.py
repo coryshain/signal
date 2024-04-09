@@ -14,6 +14,7 @@ def load_raw(
         fif_path,
         channel_mask_path=None
 ):
+    print(fif_path, channel_mask_path)
     raw = get_raw(fif_path)
     suffix = get_fif_suffix(fif_path)
     subject = basename(fif_path[:len(fif_path) - len(suffix)])
