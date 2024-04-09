@@ -1,13 +1,9 @@
 import textwrap
+import yaml
 import argparse
-import numpy as np
-import pandas as pd
-
-from matplotlib import pyplot as plt
 
 from brainsignal.config import *
 from brainsignal.util import *
-from brainsignal import data
 from brainsignal import pipeline
 
 
@@ -48,6 +44,12 @@ if __name__ == '__main__':
     for cfg_path in cfg_paths:
         cfg = get_config(cfg_path)
         output_dir = cfg['output_dir']
+
+        if not os.path.exists(output_dir):
+            os.makedirs(output_dir)
+        with open(join(output_dir, CFG_FILENAME), 'w') as f:
+            yaml.safe_dump(cfg, f, sort_keys=False)
+
         if action_ids is not None:
             action_sequences = [
                 get_action_sequence(

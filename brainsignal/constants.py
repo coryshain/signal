@@ -1,3 +1,4 @@
+CFG_FILENAME = 'config.yml'
 RAW_SUFFIX = '-raw.fif.gz'
 EPOCHS_SUFFIX = '-epo.fif.gz'
 PLOT_SUFFIX = '_evoked.png'
@@ -16,12 +17,12 @@ ACTION_VERB_TO_NOUN = dict(
 )
 PATHS = dict(
     preprocess=dict(
-        kwargs='preprocess_kwargs.yml',
+        kwargs='%s_preprocess_kwargs.yml',
         subdir=ACTION_VERB_TO_NOUN['preprocess'],
         output='%%s%s' % RAW_SUFFIX,
     ),
     epoch=dict(
-        kwargs='epoch_kwargs.yml',
+        kwargs='%s_epoch_kwargs.yml',
         subdir=ACTION_VERB_TO_NOUN['epoch'],
         output='%%s%s' % EPOCHS_SUFFIX,
     ),
