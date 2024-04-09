@@ -112,7 +112,7 @@ def get_epochs(
         pad_right_s=0.,
         duration=None,
         picks=None,
-        baseline=None
+        baseline=(None, 0)
 ):
     tmin = -pad_left_s
     if duration is None:
