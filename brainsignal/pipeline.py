@@ -53,8 +53,9 @@ def epoch(
         stimulus_table,
         **kwargs
     )
-    epochs = data.process_signal(epochs, postprocessing_steps)
-    epochs = epochs.apply_baseline(baseline=kwargs.get('baseline', (None, 0)))
+    if postprocessing_steps:
+        epochs = data.process_signal(epochs, postprocessing_steps)
+        epochs = epochs.apply_baseline(baseline=kwargs.get('baseline', (None, 0)))
 
     save_dir = get_path(output_dir, 'subdir', 'epoch', epoching_id, subject=subject)
     if not os.path.exists(save_dir):
@@ -69,8 +70,10 @@ def plot(
         output_dir,
         plotting_id,
         epoching_id,
+        postprocessing_steps=None,
+        baseline=(None, 0),
         label_columns=None,
-        groupby_columns=None
+        groupby_columns=None,
 ):
     epoching_dir = get_path(output_dir, 'subdir', 'epoch', epoching_id)
     epochs_paths = []
@@ -81,6 +84,8 @@ def plot(
         epochs_paths,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
+        postprocessing_steps=postprocessing_steps,
+        baseline=baseline
     )
 
     plotting_dir = get_path(output_dir, 'subdir', 'plot', plotting_id)

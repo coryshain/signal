@@ -183,7 +183,9 @@ def get_epoch_indices_by_label(
 def get_evoked(
         paths,
         label_columns=None,
-        groupby_columns=None
+        groupby_columns=None,
+        postprocessing_steps=None,
+        baseline=(None, 0)
 ):
     evoked = {}
     times = None
@@ -191,6 +193,9 @@ def get_evoked(
         groupby_columns = [groupby_columns]
     for i, path in enumerate(paths):
         epochs = load_epochs(path)
+        if postprocessing_steps:
+            epochs = process_signal(epochs, postprocessing_steps)
+            epochs = epochs.apply_baseline(baseline=baseline)
         if times is None:
             times = epochs.times
         else:
