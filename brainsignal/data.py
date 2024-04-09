@@ -210,6 +210,7 @@ def get_evoked(
             if key is not None:
                 if len(groupby_columns) == 1:
                     key = [key]
+                key = [', '.join([str(_x) for _x in x]) if isinstance(x, tuple) else x for x in key]
                 key = '_'.join(['%s-%s' % (x, y) for x, y in zip(groupby_columns, key)])
             indices_by_label = get_epoch_indices_by_label(
                 epochs,
