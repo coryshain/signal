@@ -1,3 +1,4 @@
+import io
 import numpy as np
 import pandas as pd
 import mne
@@ -254,7 +255,7 @@ def set_subject(inst, val):
 
 
 def get_stimulus_table(epochs):
-    return pd.read_json(epochs.info['description'])
+    return pd.read_json(io.StringIO(epochs.info['description']))
 
 
 def set_stimulus_table(epochs, stimulus_table):
