@@ -116,6 +116,21 @@ def get_word_table(event_table_path):
     return word_table
 
 
+def get_fixation_table(event_table_path):
+    stimulus_table = pd.read_csv(event_table_path)
+    sel = stimulus_table.string.isin(('+', '[]')) | stimulus_table.key.isin(('preprobe', 'postprobe'))
+    fixation_table = stimulus_table[sel]
+    fixation_table = fixation_table.rename(
+        dict(
+            event_onset='onset',
+            event_offset='offset',
+            event_duration='duration',
+        ),
+        axis=1
+    )
+    return fixation_table
+
+
 def get_langloc(h5):
     channel_ix = np.argsort(h5['elec_ch'])
     _channel_names = np.array(h5['elec_ch_label'])[channel_ix]
@@ -356,15 +371,21 @@ if __name__ == '__main__':
                 raw = get_raw(h5)
                 save_raw(raw, fif_path)
 
-        deps.append(event_path)
         word_path = output_path_base + '_stim_word.csv'
-        word_mtime, word_exists = check_deps(word_path, deps)
+        word_mtime, word_exists = check_deps(word_path, deps + [event_path])
         word_stale = word_mtime == 1
         do_word = force_restart or (not word_exists or word_stale)
-
         if do_word:
             word_table = get_word_table(event_path)
             save_stimulus_data(word_table, word_path)
+
+        fixation_path = output_path_base + '_stim_fixation.csv'
+        fixation_mtime, fixation_exists = check_deps(fixation_path, deps + [event_path])
+        fixation_stale = fixation_mtime == 1
+        do_fixation = force_restart or (not fixation_exists or fixation_stale)
+        if do_fixation:
+            fixation_table = get_fixation_table(event_path)
+            save_stimulus_data(fixation_table, fixation_path)
 
     if input_path is not None:
         get_channel_masks(output_dir, overwrite=force_restart)

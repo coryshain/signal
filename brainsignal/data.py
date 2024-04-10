@@ -13,9 +13,9 @@ GROUP_SEP = '-'
 
 def load_raw(
         fif_path,
-        channel_mask_path=None
+        channel_mask_path=None,
+        fixation_table_path=None
 ):
-    print(fif_path, channel_mask_path)
     raw = get_raw(fif_path)
     suffix = get_fif_suffix(fif_path)
     subject = basename(fif_path[:len(fif_path) - len(suffix)])
@@ -49,6 +49,12 @@ def load_raw(
         raw.info['temp'] = dict(channels_to_drop=channels_to_drop)
     else:
         raw.info['temp'] = dict(channels_to_drop=None)
+
+    if fixation_table_path is None:
+        fixation_table_path = fif_path[:len(fif_path) - len(suffix)] + '_stim_fixation.csv'
+    if os.path.exists(fixation_table_path):
+        fixation_table = pd.read_csv(fixation_table_path)
+        set_table(raw, fixation_table)
 
     set_subject(raw, subject)
 
@@ -112,7 +118,7 @@ def get_epochs(
         pad_right_s=0.,
         duration=None,
         picks=None,
-        baseline=(None, 0)
+        baseline=None
 ):
     tmin = -pad_left_s
     if duration is None:
@@ -141,7 +147,7 @@ def get_epochs(
         baseline=baseline,
         preload=True
     )
-    set_stimulus_table(epochs, stimulus_table)
+    set_table(epochs, stimulus_table)
 
     return epochs
 
@@ -165,7 +171,7 @@ def get_epoch_indices_by_label(
     if label_columns is None:
         label_columns = ['condition']
     if stimulus_table is None:
-        stimulus_table = get_stimulus_table(epochs)
+        stimulus_table = get_table(epochs)
     elif not isinstance(label_columns, list):
         label_columns = [label_columns]
     labels = None
@@ -185,8 +191,7 @@ def get_evoked(
         paths,
         label_columns=None,
         groupby_columns=None,
-        postprocessing_steps=None,
-        baseline=(None, 0)
+        postprocessing_steps=None
 ):
     evoked = {}
     times = None
@@ -196,12 +201,12 @@ def get_evoked(
         epochs = load_epochs(path)
         if postprocessing_steps:
             epochs = process_signal(epochs, postprocessing_steps)
-            epochs = epochs.apply_baseline(baseline=baseline)
+            epochs = epochs.apply_baseline(baseline=epochs.baseline)
         if times is None:
             times = epochs.times
         else:
             assert np.allclose(times, epochs.times), 'Mismatched epoch times at epoch index %d' % i
-        stimulus_table = get_stimulus_table(epochs)
+        stimulus_table = get_table(epochs)
         if groupby_columns != [None]:
             gb_iter = stimulus_table.groupby(groupby_columns)
         else:
@@ -255,14 +260,14 @@ def set_subject(inst, val):
     return inst
 
 
-def get_stimulus_table(epochs):
-    return pd.read_json(io.StringIO(epochs.info['description']))
+def get_table(inst):
+    return pd.read_json(io.StringIO(inst.info['description']))
 
 
-def set_stimulus_table(epochs, stimulus_table):
-    epochs.info['description'] = stimulus_table.to_json()
+def set_table(inst, stimulus_table):
+    inst.info['description'] = stimulus_table.to_json()
 
-    return epochs
+    return inst
 
 
 def process_signal(inst, steps):
@@ -446,3 +451,22 @@ def _stft(x, sfreq, fmin=None, fmax=None):
 def stft(raw, fmin=None, fmax=None):
     sfreq = raw.info['sfreq']
     return raw.apply_function(_stft, sfreq=sfreq, fmin=fmin, fmax=fmax, n_jobs=4)
+
+
+def _psc_transform(x, baseline_mask):
+    m = (x * baseline_mask).sum(axis=-1, keepdims=True)  / baseline_mask.sum(axis=-1, keepdims=True)
+    x = (x / m) - 1
+
+    return x
+
+
+def psc_transform(raw):
+    fixation_table = get_table(raw)
+    s, e = fixation_table.onset.values, fixation_table.offset.values
+    times = raw.times[..., None]
+    while len(s.shape) < len(times.shape):
+        s = s[None, ...]
+    while len(e.shape) < len(times.shape):
+        e = e[None, ...]
+    baseline_mask = np.logical_and(times >= s, times <= e).sum(axis=-1).astype(bool)
+    return raw.apply_function(_psc_transform, baseline_mask=baseline_mask, n_jobs=-1)

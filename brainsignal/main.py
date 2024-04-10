@@ -85,7 +85,7 @@ if __name__ == '__main__':
 
                     if do_action:
                         if action_type == 'preprocess':
-                            raw = pipeline.preprocess(
+                            pipeline.preprocess(
                                 cfg['output_dir'],
                                 fif_path=data_info['fif'],
                                 channel_mask_path=data_info['channel_mask_path'],
@@ -100,8 +100,7 @@ if __name__ == '__main__':
                                     stimulus_type=action_kwargs.get('stimulus_type', 'event')
                                 )
                             )
-
-                            epochs = pipeline.epoch(
+                            pipeline.epoch(
                                 output_dir,
                                 subject,
                                 stimulus_table_path=stimulus_table_path,
