@@ -42,7 +42,7 @@ def preprocess(
     preprocessing_path = get_path(output_dir, 'output', 'preprocess', preprocessing_id, subject=subject)
     raw.save(preprocessing_path, overwrite=True)
 
-    return raw
+    del raw
 
 
 def epoch(
@@ -94,7 +94,8 @@ def epoch(
     epoching_path = get_path(output_dir, 'output', 'epoch', epoching_id, subject=subject)
     epochs.save(epoching_path, overwrite=True)
 
-    return epochs
+    del epochs
+    del raw
 
 
 def plot(

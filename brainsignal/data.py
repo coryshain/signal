@@ -249,6 +249,8 @@ def get_evoked(
                 if label not in evoked[key]:
                     evoked[key][label] = []
                 evoked[key][label].append(_evoked)
+        del epochs
+
     for key in evoked:
         for label in evoked[key]:
             evoked[key][label] = np.concatenate(evoked[key][label], axis=0)
