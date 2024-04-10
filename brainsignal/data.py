@@ -142,6 +142,7 @@ def get_epochs(
         _info['description'] = raw.info['description']
         _info['bads'] = raw.info['bads']
         _raw = mne.io.RawArray(raw.get_data(picks='all'), _info)
+        del raw
         raw = _raw
 
         event_times = event_times / event_duration

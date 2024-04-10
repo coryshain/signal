@@ -404,6 +404,7 @@ if __name__ == '__main__':
                     stderr('  Saving signals (FIF)\n')
                     raw = get_raw(h5, start_index=start_index, end_index=end_index)
                     save_raw(raw, fif_path)
+                    del raw
 
             word_path = _output_path_base + '_stim_word.csv'
             word_mtime, word_exists = check_deps(word_path, deps + [event_path])
