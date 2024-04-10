@@ -116,6 +116,7 @@ def get_epochs(
         stimulus_table,
         pad_left_s=0.1,
         pad_right_s=0.,
+        n_ticks=1000,
         duration=None,
         picks=None,
         baseline=None,
@@ -153,13 +154,16 @@ def get_epochs(
     epochs = mne.Epochs(
         raw,
         events,
-        # event_id=event_id,
         tmin=tmin,
         tmax=tmax,
         picks=picks,
         baseline=baseline,
         preload=True
     )
+    duration = epochs.times.max() - epochs.times.min()
+    sfreq_new = n_ticks / duration
+    if epochs.info['sfreq'] != sfreq_new:
+        epochs.resample(sfreq_new)
     set_table(epochs, stimulus_table)
 
     return epochs

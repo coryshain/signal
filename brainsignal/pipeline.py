@@ -140,7 +140,7 @@ def plot(
     output_path = get_path(output_dir, 'output', 'plot', plotting_id)
 
     if split_times is not None:
-        split_times = np.array(split_times)
+        split_times = np.array(split_times, dtype=float)
 
     output = []
     for group in evoked:
