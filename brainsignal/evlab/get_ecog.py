@@ -104,7 +104,9 @@ def get_stimulus_data(h5, stimulus_type='event'):
 
 def get_word_table(event_table_path):
     stimulus_table = pd.read_csv(event_table_path)
-    word_table = stimulus_table[stimulus_table.key.str.startswith('word')]
+    sel = stimulus_table.key.str.startswith('word')
+    sel &= stimulus_table.event_duration < 5
+    word_table = stimulus_table[sel]
     word_table = word_table.rename(
         dict(
             event_onset='onset',
@@ -119,6 +121,7 @@ def get_word_table(event_table_path):
 def get_fixation_table(event_table_path):
     stimulus_table = pd.read_csv(event_table_path)
     sel = stimulus_table.string.isin(('+', '[]')) | stimulus_table.key.isin(('preprobe', 'postprobe'))
+    sel &= stimulus_table.event_duration < 5
     fixation_table = stimulus_table[sel]
     fixation_table = fixation_table.rename(
         dict(
