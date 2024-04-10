@@ -59,12 +59,14 @@ if __name__ == '__main__':
                 ) for action_id in action_ids]
         else:
             action_sequences = [get_action_sequence(cfg, action_type=action_type_top)]
+        subjects = []
         for action_sequence in action_sequences:
             deps = [[]]
             for data_info in get_data_info(cfg):
                 fif_path = data_info['fif']
                 suffix = get_fif_suffix(fif_path)
                 subject = basename(fif_path[:len(fif_path) - len(suffix)])
+                subjects.append(subject)
 
                 _deps = [fif_path]
                 deps[-1].append(fif_path)
@@ -100,10 +102,12 @@ if __name__ == '__main__':
                                     stimulus_type=action_kwargs.get('stimulus_type', 'event')
                                 )
                             )
+                            event_duration = data_info['event_duration']
                             pipeline.epoch(
                                 output_dir,
                                 subject,
                                 stimulus_table_path=stimulus_table_path,
+                                event_duration=event_duration,
                                 **action_kwargs
                             )
                     else:
@@ -131,6 +135,7 @@ if __name__ == '__main__':
                     if action_type == 'plot':
                         pipeline.plot(
                             output_dir,
+                            subjects=subjects,
                             **action_kwargs
                         )
                 else:

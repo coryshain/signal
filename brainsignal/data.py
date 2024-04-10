@@ -14,7 +14,7 @@ GROUP_SEP = '-'
 def load_raw(
         fif_path,
         channel_mask_path=None,
-        fixation_table_path=None
+        fixation_table_path=None,
 ):
     raw = get_raw(fif_path)
     suffix = get_fif_suffix(fif_path)
@@ -118,7 +118,9 @@ def get_epochs(
         pad_right_s=0.,
         duration=None,
         picks=None,
-        baseline=None
+        baseline=None,
+        normalize_time=False,
+        event_duration=None
 ):
     tmin = -pad_left_s
     if duration is None:
@@ -127,11 +129,22 @@ def get_epochs(
     n_events = len(stimulus_table)
 
     raw = raw.crop(raw.times.min(), raw.times.max())
-
     events = np.zeros((n_events, 3), dtype=int)
 
     # Get event times
     event_times = stimulus_table['onset'].values
+
+    if normalize_time:
+        assert event_duration is not None, 'normalize_time requires event_duration to be specified'
+        sfreq = raw.info['sfreq'] * event_duration
+        _info = mne.create_info(raw.info['ch_names'], sfreq, ch_types=raw.info.get_channel_types())
+        _info['description'] = raw.info['description']
+        _info['bads'] = raw.info['bads']
+        _raw = mne.io.RawArray(raw.get_data(picks='all'), _info)
+        raw = _raw
+
+        event_times = event_times / event_duration
+
     event_times = np.round(event_times * raw.info['sfreq']).astype(int)
     events[:, 0] = event_times
     events[:, 2] = stimulus_table.index.values

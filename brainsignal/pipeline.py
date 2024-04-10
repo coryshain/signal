@@ -99,6 +99,7 @@ def epoch(
 
 def plot(
         output_dir,
+        subjects,
         plotting_id,
         epoching_id,
         postprocessing_steps=None,
@@ -123,8 +124,10 @@ def plot(
 
     plotting_dir = get_path(output_dir, 'subdir', 'epoch', epoching_id)
     epochs_paths = []
-    for i, epoching_file in enumerate([x for x in os.listdir(plotting_dir) if x.endswith(EPOCHS_SUFFIX)]):
-        epochs_paths.append(join(plotting_dir, epoching_file))
+    for subject in subjects:
+        epoching_file = join(plotting_dir, subject + EPOCHS_SUFFIX)
+        assert os.path.exists(epoching_file), 'Non-existent epoching file %s. Cannot plot.' % epoching_file
+        epochs_paths.append(epoching_file)
 
     evoked, times = data.get_evoked(
         epochs_paths,
