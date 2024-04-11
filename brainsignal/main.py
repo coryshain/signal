@@ -59,14 +59,17 @@ if __name__ == '__main__':
                 ) for action_id in action_ids]
         else:
             action_sequences = [get_action_sequence(cfg, action_type=action_type_top)]
-        subjects = []
+        subjects = None
         for action_sequence in action_sequences:
             deps = [[]]
+            _subjects = []
+            if subjects is None:
+                subjects = _subjects
             for data_info in get_data_info(cfg):
                 fif_path = data_info['fif']
                 suffix = get_fif_suffix(fif_path)
                 subject = basename(fif_path[:len(fif_path) - len(suffix)])
-                subjects.append(subject)
+                _subjects.append(subject)
 
                 _deps = [fif_path]
                 deps[-1].append(fif_path)
