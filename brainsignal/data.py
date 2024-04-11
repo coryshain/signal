@@ -161,10 +161,12 @@ def get_epochs(
         baseline=baseline,
         preload=True
     )
-    duration = epochs.times.max() - epochs.times.min()
+    duration = tmax - tmin
+    sfreq = epochs.info['sfreq']
     sfreq_new = n_ticks / duration
-    if epochs.info['sfreq'] != sfreq_new:
-        epochs.resample(sfreq_new)
+    if sfreq != sfreq_new:
+        epochs = epochs.resample(sfreq_new)
+        epochs = epochs.crop(tmin, tmax)
     set_table(epochs, stimulus_table)
 
     return epochs
