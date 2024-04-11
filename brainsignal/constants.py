@@ -38,3 +38,19 @@ DEPS = dict(
     epoch='preprocess',
     plot='epoch'
 )
+DEPS_REV = {DEPS[x]: x for x in DEPS}
+
+
+def get_dep_seq_from_dep_map():
+    key = None
+    _DEPS_REV = DEPS_REV.copy()
+    seq = []
+    while len(_DEPS_REV):
+        key = _DEPS_REV.pop(key)
+        seq.append(key)
+
+    return seq
+
+
+DEP_SEQ = get_dep_seq_from_dep_map()
+DEP_SEQ_REV = DEP_SEQ[::-1]

@@ -36,7 +36,6 @@ if __name__ == '__main__':
         '''
     ))
     args = argparser.parse_args()
-    action_type_top = args.action_type
     action_ids = args.action_ids
     overwrite = get_overwrite(args.overwrite)
 
@@ -50,6 +49,13 @@ if __name__ == '__main__':
         with open(join(output_dir, CFG_FILENAME), 'w') as f:
             yaml.safe_dump(cfg, f, sort_keys=False)
 
+        action_type_top = None
+        for action_type in DEP_SEQ_REV:
+            if action_type in cfg:
+                action_type_top = action_type
+                break
+        assert action_type_top is not None, 'Ill-formed config at path %s, no actions specified' % cfg_path
+
         if action_ids is not None:
             action_sequences = [
                 get_action_sequence(
@@ -58,7 +64,11 @@ if __name__ == '__main__':
                     action_id=action_id
                 ) for action_id in action_ids]
         else:
-            action_sequences = [get_action_sequence(cfg, action_type=action_type_top)]
+            _action_ids = cfg[action_type_top].keys()
+            action_sequences = [
+                get_action_sequence(
+                    cfg, action_type=action_type_top, action_id=_action_id
+                ) for _action_id in _action_ids]
         subjects = None
         for action_sequence in action_sequences:
             deps = [[]]
