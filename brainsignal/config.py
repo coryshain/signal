@@ -29,6 +29,8 @@ def get_data_info(cfg):
 def get_kwargs(cfg, action_type, action_id):
     if action_id is not None and action_type in cfg:
         kwargs = copy.deepcopy(cfg[action_type][action_id])
+        if kwargs is None:
+            kwargs = {}
         kwargs.update({'%s_id' % ACTION_VERB_TO_NOUN[action_type]: action_id})
     else:
         kwargs = None

@@ -4,6 +4,8 @@ import pandas as pd
 import mne
 import scipy.signal
 
+from matplotlib import pyplot as plt
+
 from brainsignal.util import *
 
 
@@ -480,6 +482,20 @@ def _psc_transform(x, baseline_mask):
     x = (x / m) - 1
 
     return x
+
+
+def _detrend(y, polyorder=6):
+    x = np.arange(len(y))
+    polyfit = np.polyfit(x, y, polyorder)
+    polyfit[-1] = 0  # Remove intercept, i.e. last coef
+    predicted = np.polyval(polyfit, x)
+    detrended = y - predicted
+
+    return detrended
+
+
+def detrend(raw, **kwargs):
+    return raw.apply_function(_detrend, n_jobs=-1, **kwargs)
 
 
 def psc_transform(raw):

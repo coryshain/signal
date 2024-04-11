@@ -86,6 +86,7 @@ def get_stimulus_data(h5, stimulus_type='event'):
     elif stimulus_type == 'session':
         recording_end = h5['for_preproc']['elec_data_raw'].shape[-1] / freq
         split_index = np.array(h5['for_preproc']['stitch_index_raw']) - 1
+        split_index_postproc = np.array(h5['stitch_index']) - 1
         session_onset = split_index / freq
         if not len(session_onset.shape):
             session_onset = session_onset[..., None]
@@ -95,6 +96,7 @@ def get_stimulus_data(h5, stimulus_type='event'):
             session_onset=session_onset,
             session_offset=session_offset,
             split_index=split_index,
+            split_index_postproc=split_index_postproc,
             session_index=session_index
         ))
 
@@ -192,7 +194,7 @@ def remap_duplicate_channel_names(channel_names):
     return channel_names
 
 
-def get_info(h5):
+def get_info(h5, postproc=False):
     # Channel indices
     channel_ix = np.argsort(h5['elec_ch'])
 
@@ -224,7 +226,10 @@ def get_info(h5):
     bads = _channel_names[bads].tolist()
 
     # Sampling frequency
-    sfreq = h5['for_preproc']['sample_freq_raw']
+    if postproc:
+        sfreq = h5['sample_freq']
+    else:
+        sfreq = h5['for_preproc']['sample_freq_raw']
 
     # Info object
     info = mne.create_info(
@@ -237,11 +242,16 @@ def get_info(h5):
     return info
 
 
-def get_raw(h5, start_index=0, end_index=None):
-    info = get_info(h5)
+def get_raw(h5, start_index=0, end_index=None, postproc=False):
+    info = get_info(h5, postproc=postproc)
     ix = slice(start_index, end_index)
-    print(ix)
-    raw = h5['for_preproc']['elec_data_raw'][..., ix]
+
+    if postproc:
+        raw = h5['elec_data']
+    else:
+        raw = h5['for_preproc']['elec_data_raw']
+
+    raw = raw[..., ix]
     raw = mne.io.RawArray(raw, info)
 
     return raw
@@ -257,7 +267,10 @@ def get_channel_masks(langloc_dir, overwrite=False):
     suffix_out = '_channel_mask.csv'
     keyword = '_MITLangloc'
     if os.path.exists(langloc_dir):
-        for filename in [x for x in os.listdir(langloc_dir) if (keyword in x and x.endswith(suffix_in))]:
+        for filename in [
+            x for x in os.listdir(langloc_dir) if
+                ('Sess' not in x) and (keyword in x and x.endswith(suffix_in))
+        ]:
             subject = filename[:-len(suffix_in)].replace(keyword, '')
             path = join(langloc_dir, filename)
             channel_mask = pd.read_csv(path)[['channel', 's_vs_n_sig']].rename(dict(s_vs_n_sig='include'), axis=1)
@@ -277,12 +290,15 @@ if __name__ == '__main__':
     ))
     argparser.add_argument('input_paths', nargs='+', help='Input directory containing MATLAB (*.mat) objects.')
     argparser.add_argument('output_dir', help='Output directory in which to place HDF5 and CSV files.')
+    argparser.add_argument('-p', '--get_postprocessed', action='store_true',
+                           help='Also extract MATLAB-postprocessed data (files will contain "MAT").')
     argparser.add_argument('-f', '--force_restart', action='store_true',
                            help='Force restart. Otherwise, skip existing files.')
     args = argparser.parse_args()
 
     input_paths = args.input_paths
     output_dir = args.output_dir
+    get_postprocessed = args.get_postprocessed
     force_restart = args.force_restart
 
     if not os.path.exists(output_dir):
@@ -339,95 +355,110 @@ if __name__ == '__main__':
         deps.append(session_path)
 
         session_indices = session_table.session_index.values.astype(int)
-        start_indices = session_table.split_index.values.astype(int)
-        end_indices = start_indices[1:].tolist() + [None]
         session_onsets = session_table.session_onset.values
 
-        for session_index, start_index, end_index, session_onset in zip(
-                session_indices, start_indices, end_indices, session_onsets):
-            _output_path_base = output_path_base + 'Sess%s' % session_index
-            trial_path = _output_path_base + '_stim_trial.csv'
-            trial_mtime, trial_exists = check_deps(trial_path, deps)
-            trial_stale = trial_mtime == 1
-            do_trial = force_restart or (not trial_exists or trial_stale)
+        if get_postprocessed:
+            postproc_settings = (False, True)
+        else:
+            postproc_settings = (False,)
 
-            event_path = _output_path_base + '_stim_event.csv'
-            event_mtime, event_exists = check_deps(event_path, deps)
-            event_stale = event_mtime == 1
-            do_event = force_restart or (not event_exists or event_stale)
+        for postproc in postproc_settings:
+            if postproc:
+                start_indices = session_table.split_index_postproc.values.astype(int)
+                end_indices = start_indices[1:].tolist() + [None]
+            else:
+                start_indices = session_table.split_index.values.astype(int)
+                end_indices = start_indices[1:].tolist() + [None]
 
-            langloc_path = _output_path_base + '_langloc.csv'
-            langloc_mtime, langloc_exists = check_deps(langloc_path, deps)
-            langloc_stale = langloc_mtime == 1
-            do_langloc = force_restart or (not langloc_exists or langloc_stale)
+            for session_index, start_index, end_index, session_onset in zip(
+                    session_indices, start_indices, end_indices, session_onsets
+            ):
+                _output_path_base = output_path_base
+                if postproc:
+                    _output_path_base = _output_path_base + 'MAT'
+                _output_path_base = _output_path_base + 'Sess%s' % session_index
+                trial_path = _output_path_base + '_stim_trial.csv'
+                trial_mtime, trial_exists = check_deps(trial_path, deps)
+                trial_stale = trial_mtime == 1
+                do_trial = force_restart or (not trial_exists or trial_stale)
 
-            fif_path = _output_path_base + '-raw.fif'
-            fif_mtime, fif_exists = check_deps(fif_path, deps)
-            fif_stale = fif_mtime == 1
-            do_fif = force_restart or (not fif_exists or fif_stale)
+                event_path = _output_path_base + '_stim_event.csv'
+                event_mtime, event_exists = check_deps(event_path, deps)
+                event_stale = event_mtime == 1
+                do_event = force_restart or (not event_exists or event_stale)
 
-            if do_trial or do_event or do_langloc or do_fif:
-                # Get MATLAB data
-                if not h5_loaded:
-                    stderr('  Loading from MATLAB\n')
-                    h5 = get_matlab_data(h5_path)
-                    h5_loaded = True
+                langloc_path = _output_path_base + '_langloc.csv'
+                langloc_mtime, langloc_exists = check_deps(langloc_path, deps)
+                langloc_stale = langloc_mtime == 1
+                do_langloc = force_restart or (not langloc_exists or langloc_stale)
 
-                # Get and save trial data
-                if do_trial:
-                    stderr('  Saving trial table\n')
-                    trial_table = get_stimulus_data(h5, stimulus_type='trial')
-                    trial_table = trial_table[trial_table.session == session_index]
-                    for col in trial_table:
-                        if 'onset' in col or 'offset' in col:
-                            trial_table[col] -= session_onset
-                    save_stimulus_data(trial_table, trial_path)
+                fif_path = _output_path_base + '-raw.fif'
+                fif_mtime, fif_exists = check_deps(fif_path, deps)
+                fif_stale = fif_mtime == 1
+                do_fif = force_restart or (not fif_exists or fif_stale)
 
-                # Get and save event data
-                if do_event:
-                    stderr('  Saving event table\n')
-                    event_table = get_stimulus_data(h5)
-                    event_table = event_table[event_table.session == session_index]
-                    for col in event_table:
-                        if 'onset' in col or 'offset' in col:
-                            event_table[col] -= session_onset
-                    save_stimulus_data(event_table, event_path)
+                if do_trial or do_event or do_langloc or do_fif:
+                    # Get MATLAB data
+                    if not h5_loaded:
+                        stderr('  Loading from MATLAB\n')
+                        h5 = get_matlab_data(h5_path)
+                        h5_loaded = True
 
-                # Get and save langloc data
-                if do_langloc:
-                    stderr('  Saving LangLoc table\n')
-                    langloc_table = get_langloc(h5)
-                    save_stimulus_data(langloc_table, langloc_path)
+                    # Get and save trial data
+                    if do_trial:
+                        stderr('  Saving trial table\n')
+                        trial_table = get_stimulus_data(h5, stimulus_type='trial')
+                        trial_table = trial_table[trial_table.session == session_index]
+                        for col in trial_table:
+                            if 'onset' in col or 'offset' in col:
+                                trial_table[col] -= session_onset
+                        save_stimulus_data(trial_table, trial_path)
 
-                # Get and save raw signal
-                if do_fif:
-                    stderr('  Saving signals (FIF)\n')
-                    raw = get_raw(h5, start_index=start_index, end_index=end_index)
-                    save_raw(raw, fif_path)
-                    del raw
+                    # Get and save event data
+                    if do_event:
+                        stderr('  Saving event table\n')
+                        event_table = get_stimulus_data(h5)
+                        event_table = event_table[event_table.session == session_index]
+                        for col in event_table:
+                            if 'onset' in col or 'offset' in col:
+                                event_table[col] -= session_onset
+                        save_stimulus_data(event_table, event_path)
 
-            word_path = _output_path_base + '_stim_word.csv'
-            word_mtime, word_exists = check_deps(word_path, deps + [event_path])
-            word_stale = word_mtime == 1
-            do_word = force_restart or (not word_exists or word_stale)
+                    # Get and save langloc data
+                    if do_langloc:
+                        stderr('  Saving LangLoc table\n')
+                        langloc_table = get_langloc(h5)
+                        save_stimulus_data(langloc_table, langloc_path)
 
-            fixation_path = _output_path_base + '_stim_fixation.csv'
-            fixation_mtime, fixation_exists = check_deps(fixation_path, deps + [event_path])
-            fixation_stale = fixation_mtime == 1
-            do_fixation = force_restart or (not fixation_exists or fixation_stale)
+                    # Get and save raw signal
+                    if do_fif:
+                        stderr('  Saving signals (FIF)\n')
+                        raw = get_raw(h5, start_index=start_index, end_index=end_index, postproc=postproc)
+                        save_raw(raw, fif_path)
+                        del raw
 
-            if do_word or do_fixation:
-                # Get and save word-level data
-                if do_word:
-                    stderr('  Saving word table\n')
-                    word_table = get_word_table(event_path)
-                    save_stimulus_data(word_table, word_path)
+                word_path = _output_path_base + '_stim_word.csv'
+                word_mtime, word_exists = check_deps(word_path, deps + [event_path])
+                word_stale = word_mtime == 1
+                do_word = force_restart or (not word_exists or word_stale)
 
-                # Get and save fixation-level data
-                if do_fixation:
-                    stderr('  Saving fixation table\n')
-                    fixation_table = get_fixation_table(event_path)
-                    save_stimulus_data(fixation_table, fixation_path)
+                fixation_path = _output_path_base + '_stim_fixation.csv'
+                fixation_mtime, fixation_exists = check_deps(fixation_path, deps + [event_path])
+                fixation_stale = fixation_mtime == 1
+                do_fixation = force_restart or (not fixation_exists or fixation_stale)
+
+                if do_word or do_fixation:
+                    # Get and save word-level data
+                    if do_word:
+                        stderr('  Saving word table\n')
+                        word_table = get_word_table(event_path)
+                        save_stimulus_data(word_table, word_path)
+
+                    # Get and save fixation-level data
+                    if do_fixation:
+                        stderr('  Saving fixation table\n')
+                        fixation_table = get_fixation_table(event_path)
+                        save_stimulus_data(fixation_table, fixation_path)
 
     if input_path is not None:
         get_channel_masks(output_dir, overwrite=force_restart)
