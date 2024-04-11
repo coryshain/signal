@@ -176,9 +176,10 @@ def get_epochs(
 
 def get_epochs_data_by_indices(
         epochs,
-        indices
+        indices,
+        ch_names=None
 ):
-    s = epochs[indices].get_data(copy=False)
+    s = epochs[indices].get_data(copy=False, picks=ch_names)
     t = s.shape[-1]
     s = s.reshape((-1, t))
 
@@ -213,6 +214,7 @@ def get_evoked(
         paths,
         label_columns=None,
         groupby_columns=None,
+        by_sensor=False,
         postprocessing_steps=None
 ):
     evoked = {}
@@ -242,22 +244,34 @@ def get_evoked(
                 label_columns=label_columns,
                 stimulus_table=_stimulus_table
             )
-            if key not in evoked:
-                evoked[key] = {}
             for label in indices_by_label:
-                _evoked = get_epochs_data_by_indices(
-                    epochs,
-                    indices_by_label[label]
-                )
-                if label not in evoked[key]:
-                    evoked[key][label] = []
-                evoked[key][label].append(_evoked)
+                if by_sensor:
+                    ch_names = epochs.info['ch_names']
+                    if key is not None:
+                        keys = ['%s-%s' % (key, ch_name) for ch_name in ch_names]
+                    else:
+                        keys = ch_names
+                else:
+                    ch_names = [None]
+                    keys = [key]
+                for _key, ch_name in zip(keys, ch_names):
+                    _evoked = get_epochs_data_by_indices(
+                        epochs,
+                        indices_by_label[label],
+                        ch_names=ch_name
+                    )
+                    if _key not in evoked:
+                        evoked[_key] = {}
+                    if label not in evoked[_key]:
+                        evoked[_key][label] = []
+                    evoked[_key][label].append(_evoked)
         del epochs
 
     for key in evoked:
         for label in evoked[key]:
             _evoked = evoked[key][label]
-            n_times = min(*[x.shape[-1] for x in _evoked])
+            n_times = [x.shape[-1] for x in _evoked]
+            n_times = min(n_times)
             _evoked = [x[..., :n_times] for x in _evoked]
             evoked[key][label] = np.concatenate(_evoked, axis=0)
 

@@ -106,6 +106,7 @@ def plot(
         postprocessing_steps=None,
         label_columns=None,
         groupby_columns=None,
+        by_sensor=False,
         split_times=None
 ):
     plotting_dir = get_path(output_dir, 'subdir', 'plot', plotting_id)
@@ -134,6 +135,7 @@ def plot(
         epochs_paths,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
+        by_sensor=by_sensor,
         postprocessing_steps=postprocessing_steps
     )
 
