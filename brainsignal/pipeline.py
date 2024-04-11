@@ -164,9 +164,12 @@ def plot(
                 sample_size=s.shape[0]
             )
             output.append(row)
+
+            t = s.shape[-1]
+            
             if split_times is None:
-                plt.plot(times, m, label=label, color=colors[i])
-                plt.fill_between(times, m - e, m + e, color=colors[i], alpha=0.1)
+                plt.plot(times[:t], m, label=label, color=colors[i])
+                plt.fill_between(times[:t], m - e, m + e, color=colors[i], alpha=0.1)
             else:
                 split_ix = (times[..., None] >= split_times).sum(axis=-1)
                 split_ix[1:len(split_ix)] -= split_ix[:len(split_ix) - 1]

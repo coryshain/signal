@@ -168,7 +168,7 @@ def get_epochs(
     sfreq_new = n_ticks / duration
     if sfreq != sfreq_new:
         epochs = epochs.resample(sfreq_new)
-        epochs = epochs.crop(tmin, tmax)
+        epochs = epochs.crop(tmin, tmax, include_tmax=False)
     set_table(epochs, stimulus_table)
 
     return epochs
@@ -226,8 +226,6 @@ def get_evoked(
             epochs = epochs.apply_baseline(baseline=epochs.baseline)
         if times is None:
             times = epochs.times
-        else:
-            assert np.allclose(times, epochs.times), 'Mismatched epoch times at epoch index %d' % i
         stimulus_table = get_table(epochs)
         if groupby_columns != [None]:
             gb_iter = stimulus_table.groupby(groupby_columns)
@@ -258,7 +256,10 @@ def get_evoked(
 
     for key in evoked:
         for label in evoked[key]:
-            evoked[key][label] = np.concatenate(evoked[key][label], axis=0)
+            _evoked = evoked[key][label]
+            n_times = min(*[x.shape[-1] for x in _evoked])
+            _evoked = [x[..., :n_times] for x in _evoked]
+            evoked[key][label] = np.concatenate(_evoked, axis=0)
 
     assert times is not None, 'At least one epochs file must be provided'
 
