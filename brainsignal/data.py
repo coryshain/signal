@@ -118,7 +118,7 @@ def get_epochs(
         stimulus_table,
         pad_left_s=0.1,
         pad_right_s=0.,
-        n_ticks=1000,
+        n_ticks=None,
         duration=None,
         picks=None,
         baseline=None,
@@ -163,12 +163,18 @@ def get_epochs(
         baseline=baseline,
         preload=True
     )
-    duration = tmax - tmin
-    sfreq = epochs.info['sfreq']
-    sfreq_new = n_ticks / duration
-    if sfreq != sfreq_new:
-        epochs = epochs.resample(sfreq_new)
-        epochs = epochs.crop(tmin, tmax, include_tmax=False)
+
+    if normalize_time:
+        # Data must be resampled to a fixed number of steps or else epochs may have variable length
+        if not n_ticks:
+            n_ticks = 1000
+        duration = tmax - tmin
+        sfreq = epochs.info['sfreq']
+        sfreq_new = n_ticks / duration
+        if sfreq != sfreq_new:
+            epochs = epochs.resample(sfreq_new)
+            epochs = epochs.crop(tmin, tmax, include_tmax=False)
+
     set_table(epochs, stimulus_table)
 
     return epochs
@@ -177,13 +183,57 @@ def get_epochs(
 def get_epochs_data_by_indices(
         epochs,
         indices,
-        ch_names=None
+        ch_names=None,
 ):
     s = epochs[indices].get_data(copy=False, picks=ch_names)
     t = s.shape[-1]
-    s = s.reshape((-1, t))
+    evoked = s.reshape((-1, t))
+    times = epochs.times
 
-    return s
+    return evoked, times
+
+
+def get_epochs_spectrogram_by_indices(
+        epochs,
+        indices,
+        fmin=1,
+        fmax=None,
+        nfreq=100,
+        morlet=False,
+        window_length=0.75,
+        ch_names=None
+):
+    s = epochs[indices]
+    sfreq = epochs.info['sfreq']
+    if fmax is None:
+        fmax = sfreq / 2 - 1
+    freqs = np.linspace(fmin, fmax, nfreq)
+    if morlet:
+        fn = mne.time_frequency.tfr_morlet
+    else:
+        fn = mne.time_frequency.tfr_multitaper
+    n_cycles = freqs * window_length
+    artifact_window = window_length / 2
+    power = fn(
+        s,
+        freqs,
+        n_cycles,
+        return_itc=False,
+        decim=10,
+        picks=ch_names,
+        average=False,
+        n_jobs=-1
+    )
+    baseline = (epochs.baseline[0] + artifact_window, epochs.baseline[1])
+    power.apply_baseline(baseline, mode='zscore')
+    tmin, tmax = power.times[[0, -1]]
+    power = power.crop(tmin + artifact_window, tmax - artifact_window)
+    times = power.times
+    f, t = power.data.shape[-2:]
+    evoked = power.data
+    evoked = np.flip(evoked.reshape((-1, f, t)), -2)
+
+    return evoked, times
 
 
 def get_epoch_indices_by_label(
@@ -215,19 +265,27 @@ def get_evoked(
         label_columns=None,
         groupby_columns=None,
         by_sensor=False,
-        postprocessing_steps=None
+        postprocessing_steps=None,
+        as_spectrogram=False
 ):
     evoked = {}
     times = None
+    fmin = 1
+    fmax = None
     if not isinstance(groupby_columns, list):
         groupby_columns = [groupby_columns]
     for i, path in enumerate(paths):
         epochs = load_epochs(path)
+        if as_spectrogram:
+            if fmax is None:
+                fmax = epochs.info['sfreq'] / 2  # Nyquist frequency
+            else:
+                assert fmax == epochs.info['sfreq'] / 2, ('All sampling rates must be equal for spectrogram '
+                                                             'extraction. Got %sHz and %sHz.' % (
+                                                                fmax * 2, epochs.info['sfreq']))
         if postprocessing_steps:
             epochs = process_signal(epochs, postprocessing_steps)
             epochs = epochs.apply_baseline(baseline=epochs.baseline)
-        if times is None:
-            times = epochs.times
         stimulus_table = get_table(epochs)
         if groupby_columns != [None]:
             gb_iter = stimulus_table.groupby(groupby_columns)
@@ -255,11 +313,22 @@ def get_evoked(
                     ch_names = [None]
                     keys = [key]
                 for _key, ch_name in zip(keys, ch_names):
-                    _evoked = get_epochs_data_by_indices(
-                        epochs,
-                        indices_by_label[label],
-                        ch_names=ch_name
-                    )
+                    if as_spectrogram:
+                        _evoked, _times = get_epochs_spectrogram_by_indices(
+                            epochs,
+                            indices_by_label[label],
+                            fmin=fmin,
+                            fmax=fmax,
+                            ch_names=ch_name
+                        )
+                    else:
+                        _evoked, _times = get_epochs_data_by_indices(
+                            epochs,
+                            indices_by_label[label],
+                            ch_names=ch_name
+                        )
+                    if times is None:
+                        times = _times
                     if _key not in evoked:
                         evoked[_key] = {}
                     if label not in evoked[_key]:
@@ -277,7 +346,7 @@ def get_evoked(
 
     assert times is not None, 'At least one epochs file must be provided'
 
-    return evoked, times
+    return evoked, times, fmin, fmax
 
 
 
@@ -471,25 +540,6 @@ def savgol_filter(raw, w=0.25, polyorder=5, **kwargs):
         polyorder=polyorder,
         **kwargs
     )
-
-
-def _stft(x, sfreq, fmin=None, fmax=None):
-    stft = scipy.signal.ShortTimeFFT(np.ones(256), 1, sfreq, fft_mode='centered')
-    S = stft.stft(x)
-    f = stft.f
-    if fmin is None:
-        fmin = 0
-    if fmax is None:
-        fmax = sfreq / 2
-    mask = np.logical_and(f >= fmin, f <= fmax)
-    out = (S * mask[..., None]) / mask.sum()
-
-    return out
-
-
-def stft(raw, fmin=None, fmax=None):
-    sfreq = raw.info['sfreq']
-    return raw.apply_function(_stft, sfreq=sfreq, fmin=fmin, fmax=fmax, n_jobs=4)
 
 
 def _psc_transform(x, baseline_mask):

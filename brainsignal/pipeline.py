@@ -1,6 +1,7 @@
 import yaml
 import numpy as np
 import pandas as pd
+import matplotlib
 from matplotlib import pyplot as plt
 
 from brainsignal.util import *
@@ -107,7 +108,8 @@ def plot(
         label_columns=None,
         groupby_columns=None,
         by_sensor=False,
-        split_times=None
+        split_times=None,
+        as_spectrogram=False
 ):
     plotting_dir = get_path(output_dir, 'subdir', 'plot', plotting_id)
     if not os.path.exists(plotting_dir):
@@ -119,6 +121,7 @@ def plot(
         postprocessing_steps=postprocessing_steps,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
+        as_spectrogram=as_spectrogram,
     )
     kwargs_path = get_path(output_dir, 'kwargs', 'plot', plotting_id)
     with open(kwargs_path, 'w') as f:
@@ -131,12 +134,13 @@ def plot(
         assert os.path.exists(epoching_file), 'Non-existent epoching file %s. Cannot plot.' % epoching_file
         epochs_paths.append(epoching_file)
 
-    evoked, times = data.get_evoked(
+    evoked, times, fmin, fmax = data.get_evoked(
         epochs_paths,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
         by_sensor=by_sensor,
-        postprocessing_steps=postprocessing_steps
+        postprocessing_steps=postprocessing_steps,
+        as_spectrogram=as_spectrogram
     )
 
     plotting_path = get_path(output_dir, 'image', 'plot', plotting_id)
@@ -156,6 +160,7 @@ def plot(
         filename = plotting_path % filename
 
         plt.close('all')
+
         for i, label in enumerate(evoked[group]):
             s = evoked[group][label]
             m = s.mean(axis=0)
@@ -168,50 +173,84 @@ def plot(
             output.append(row)
 
             t = s.shape[-1]
-            
-            if split_times is None:
-                plt.plot(times[:t], m, label=label, color=colors[i])
-                plt.fill_between(times[:t], m - e, m + e, color=colors[i], alpha=0.1)
+
+            if as_spectrogram:
+                extent = (times[0], times[-1], fmin, fmax)
+                plt.close('all')
+
+                vcenter = 0
+                vmin = max(m.min() - 1e-8, -3)
+                vmax = min(m.max() + 1e-8, 3)
+                if vmin < 0 and vmax > 0:
+                    bound = max(abs(vmin), vmax)
+                    vmin = -bound
+                    vmax = bound
+                elif vmin < 0.:
+                    vmax = 1e-8
+                else:  # vmax > 0
+                    vmin = -1e-8
+                norm = matplotlib.colors.TwoSlopeNorm(
+                    vmin=vmin,
+                    vcenter=vcenter,
+                    vmax=vmax
+                )
+                pos = plt.imshow(
+                    m,
+                    extent=extent,
+                    aspect='auto',
+                    interpolation='hanning',
+                    norm=norm,
+                    cmap='coolwarm',
+                )
+                plt.title(label)
+                plt.gcf().colorbar(pos, ax=plt.gca(), shrink=0.7)
+                plt.gcf().set_size_inches(7, 5)
+                plt.savefig(filename[:-4] + '_%s.png' % label, dpi=300)
             else:
-                split_ix = (times[..., None] >= split_times).sum(axis=-1)
-                split_ix[1:len(split_ix)] -= split_ix[:len(split_ix) - 1]
-                split_ix = np.where(split_ix)[0]
-                _split_times = np.pad(split_times, (1, 0), mode='constant', constant_values=-np.inf)
+                if split_times is None:
+                    plt.plot(times[:t], m, label=label, color=colors[i])
+                    plt.fill_between(times[:t], m - e, m + e, color=colors[i], alpha=0.1)
+                else:
+                    split_ix = (times[..., None] >= split_times).sum(axis=-1)
+                    split_ix[1:len(split_ix)] -= split_ix[:len(split_ix) - 1]
+                    split_ix = np.where(split_ix)[0]
+                    _split_times = np.pad(split_times, (1, 0), mode='constant', constant_values=-np.inf)
 
-                m_bin = []
-                e_bin = []
-                t_bin = []
+                    m_bin = []
+                    e_bin = []
+                    t_bin = []
 
-                for j, (_times, _s, _split_time) in enumerate(
-                        zip(
-                            np.split(times, split_ix),
-                            np.split(s, split_ix, axis=-1),
-                            _split_times
-                        )
-                ):
-                    _m_bin = _s.mean(axis=None)
-                    m_bin.append(_m_bin)
-                    _m_bin = _m_bin * np.ones_like(_times)
-                    _e_bin = data.sem(_s, axis=0).mean()
-                    e_bin.append(_e_bin)
-                    _e_bin = _e_bin * np.ones_like(_times)
-                    _t_bin = _times.mean()
-                    t_bin.append(_t_bin)
-                    if np.isfinite(_split_time):
-                        plt.axvline(_split_time, c='gray', ls='dotted', alpha=0.2)
+                    for j, (_times, _s, _split_time) in enumerate(
+                            zip(
+                                np.split(times, split_ix),
+                                np.split(s, split_ix, axis=-1),
+                                _split_times
+                            )
+                    ):
+                        _m_bin = _s.mean(axis=None)
+                        m_bin.append(_m_bin)
+                        _m_bin = _m_bin * np.ones_like(_times)
+                        _e_bin = data.sem(_s, axis=0).mean()
+                        e_bin.append(_e_bin)
+                        _e_bin = _e_bin * np.ones_like(_times)
+                        _t_bin = _times.mean()
+                        t_bin.append(_t_bin)
+                        if np.isfinite(_split_time):
+                            plt.axvline(_split_time, c='gray', ls='dotted', alpha=0.2)
 
-                m_bin = np.array(m_bin)
-                e_bin = np.array(e_bin)
-                plt.plot(t_bin, m_bin, label=label, color=colors[i])
-                plt.fill_between(t_bin, m_bin - e_bin, m_bin + e_bin, color=colors[i], alpha=0.1)
+                    m_bin = np.array(m_bin)
+                    e_bin = np.array(e_bin)
+                    plt.plot(t_bin, m_bin, label=label, color=colors[i])
+                    plt.fill_between(t_bin, m_bin - e_bin, m_bin + e_bin, color=colors[i], alpha=0.1)
 
-        plt.legend()
-        plt.gcf().set_size_inches(7, 5)
-        plt.gca().spines['top'].set_visible(False)
-        plt.gca().spines['right'].set_visible(False)
-        plt.axhline(0., c='k')
-        plt.axvline(0., c='k')
-        plt.savefig(filename, dpi=300)
+        if not as_spectrogram:
+            plt.legend()
+            plt.gcf().set_size_inches(7, 5)
+            plt.gca().spines['top'].set_visible(False)
+            plt.gca().spines['right'].set_visible(False)
+            plt.axhline(0., c='k')
+            plt.axvline(0., c='k')
+            plt.savefig(filename, dpi=300)
 
     output = pd.DataFrame(output)
     output.to_csv(output_path, index=False)

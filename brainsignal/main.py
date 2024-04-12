@@ -39,6 +39,8 @@ if __name__ == '__main__':
     action_ids = args.action_ids
     overwrite = get_overwrite(args.overwrite)
 
+    memo = set()  # Memo of actions newly executed during this run, to avoid redundant computation
+
     cfg_paths = args.cfg_paths
     for cfg_path in cfg_paths:
         cfg = get_config(cfg_path)
@@ -97,6 +99,7 @@ if __name__ == '__main__':
                         do_action = True
                     else:
                         do_action = False
+                    do_action &= not output_path in memo
 
                     if do_action:
                         if action_type == 'preprocess':
@@ -106,6 +109,7 @@ if __name__ == '__main__':
                                 channel_mask_path=data_info['channel_mask_path'],
                                 **action_kwargs
                             )
+                            memo.add(output_path)
 
                         elif action_type == 'epoch':
                             stimulus_table_path = data_info.get(
@@ -123,6 +127,7 @@ if __name__ == '__main__':
                                 event_duration=event_duration,
                                 **action_kwargs
                             )
+                            memo.add(output_path)
                     else:
                         stderr('%s %s exists for subject %s. Skipping. To force re-run, run with overwrite=True.\n' %
                                (ACTION_VERB_TO_NOUN[action_type], action_id, subject))
@@ -143,6 +148,7 @@ if __name__ == '__main__':
                     do_action = True
                 else:
                     do_action = False
+                do_action &= not output_path in memo
 
                 if do_action:
                     if action_type == 'plot':
@@ -151,6 +157,7 @@ if __name__ == '__main__':
                             subjects=subjects,
                             **action_kwargs
                         )
+                        memo.add(output_path)
                 else:
                     stderr('%s %s exists. Skipping. To force re-run, run with overwrite=True.\n' %
                            (ACTION_VERB_TO_NOUN[action_type], action_id))
