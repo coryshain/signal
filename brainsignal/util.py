@@ -125,6 +125,7 @@ def get_overwrite(overwrite):
         for x in out:
             out[x] = True
     elif isinstance(overwrite, str):
+        assert overwrite in out, 'Unrecognized value for overwrite: %s' % overwrite
         out[overwrite] = True
     elif overwrite is False:
         pass

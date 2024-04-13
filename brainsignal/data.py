@@ -113,15 +113,48 @@ def get_picks(
     return picks
 
 
+def get_baseline_and_mode(
+        baseline='auto',
+        mode=None,
+        tmin=None,
+        tmax=None,
+        artifact_window=None
+):
+    if baseline is None:
+        return None, None
+    if baseline == 'auto':
+        baseline = (None, 0)
+
+    baseline = list(baseline)
+    if baseline[0] is None and tmin is not None:
+        baseline[0] = tmin
+    if baseline[1] is None and tmax is not None:
+        baseline[1] = tmax
+
+    if baseline[0] is not None and tmin is not None and artifact_window:
+        baseline[0] = max(baseline[0], tmin + artifact_window / 2)
+    if baseline[1] is not None and tmax is not None and artifact_window:
+        baseline[1] = min(baseline[1], tmax - artifact_window)
+
+    baseline = tuple(baseline)
+
+    if mode is None:
+        mode = 'mean'
+
+    return baseline, mode
+
+
 def get_epochs(
         raw,
         stimulus_table,
         pad_left_s=0.1,
         pad_right_s=0.,
+        postprocessing_steps=None,
         n_ticks=None,
         duration=None,
         picks=None,
         baseline=None,
+        baseline_mode=None,
         normalize_time=False,
         event_duration=None
 ):
@@ -160,9 +193,17 @@ def get_epochs(
         tmin=tmin,
         tmax=tmax,
         picks=picks,
-        baseline=baseline,
+        baseline=None,
         preload=True
     )
+    epochs = process_signal(epochs, postprocessing_steps)
+    baseline, baseline_mode = get_baseline_and_mode(
+        baseline=baseline,
+        mode=baseline_mode,
+        tmin=epochs.times.min(),
+        tmax=epochs.times.max()
+    )
+    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
 
     if normalize_time:
         # Data must be resampled to a fixed number of steps or else epochs may have variable length
@@ -183,9 +224,19 @@ def get_epochs(
 def get_epochs_data_by_indices(
         epochs,
         indices,
+        baseline=None,
+        baseline_mode=None,
         ch_names=None,
 ):
-    s = epochs[indices].get_data(copy=False, picks=ch_names)
+    epochs = epochs[indices]
+    baseline, baseline_mode = get_baseline_and_mode(
+        baseline=baseline,
+        mode=baseline_mode,
+        tmin=epochs.times.min(),
+        tmax=epochs.times.max()
+    )
+    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
+    s = epochs.get_data(copy=False, picks=ch_names)
     t = s.shape[-1]
     evoked = s.reshape((-1, t))
     times = epochs.times
@@ -199,8 +250,12 @@ def get_epochs_spectrogram_by_indices(
         fmin=1,
         fmax=None,
         nfreq=100,
+        db=False,
         morlet=False,
-        window_length=0.75,
+        window_length=0.5,
+        baseline=None,
+        baseline_mode=None,
+        scale_by_band=False,
         ch_names=None
 ):
     s = epochs[indices]
@@ -224,8 +279,19 @@ def get_epochs_spectrogram_by_indices(
         average=False,
         n_jobs=-1
     )
-    baseline = (epochs.baseline[0] + artifact_window, epochs.baseline[1])
-    power.apply_baseline(baseline, mode='zscore')
+    if db:
+        power.data = 10 * np.log10(power.data)
+    if scale_by_band:
+        power.data /= power.data.std(axis=-1, keepdims=True)
+
+    baseline, baseline_mode = get_baseline_and_mode(
+        baseline=baseline,
+        mode=baseline_mode,
+        tmin=power.times.min(),
+        tmax=power.times.max(),
+        artifact_window=artifact_window
+    )
+    power = apply_baseline(power, baseline=baseline, mode=baseline_mode)
     tmin, tmax = power.times[[0, -1]]
     power = power.crop(tmin + artifact_window, tmax - artifact_window)
     times = power.times
@@ -266,7 +332,10 @@ def get_evoked(
         groupby_columns=None,
         by_sensor=False,
         postprocessing_steps=None,
-        as_spectrogram=False
+        as_spectrogram=False,
+        window_length=0.5,
+        baseline=None,
+        baseline_mode=None,
 ):
     evoked = {}
     times = None
@@ -285,7 +354,13 @@ def get_evoked(
                                                                 fmax * 2, epochs.info['sfreq']))
         if postprocessing_steps:
             epochs = process_signal(epochs, postprocessing_steps)
-            epochs = epochs.apply_baseline(baseline=epochs.baseline)
+            baseline, baseline_mode = get_baseline_and_mode(
+                baseline=baseline,
+                mode=baseline_mode,
+                tmin=epochs.times.min(),
+                tmax=epochs.times.max()
+            )
+            epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
         stimulus_table = get_table(epochs)
         if groupby_columns != [None]:
             gb_iter = stimulus_table.groupby(groupby_columns)
@@ -319,12 +394,17 @@ def get_evoked(
                             indices_by_label[label],
                             fmin=fmin,
                             fmax=fmax,
-                            ch_names=ch_name
+                            baseline=baseline,
+                            baseline_mode=baseline_mode,
+                            window_length=window_length,
+                            ch_names=ch_name,
                         )
                     else:
                         _evoked, _times = get_epochs_data_by_indices(
                             epochs,
                             indices_by_label[label],
+                            baseline=baseline,
+                            baseline_mode=baseline_mode,
                             ch_names=ch_name
                         )
                     if times is None:
@@ -396,6 +476,38 @@ def process_signal(inst, steps):
             raise ValueError('Unrecognized preprocessing entry: %s' % step)
 
         inst = f(inst, **kwargs)
+
+    return inst
+
+
+def apply_baseline(inst, baseline=None, mode=None, times=None):
+    if baseline is None:
+        return inst
+
+    if times is None:
+        times = inst.times
+
+    baseline, mode = get_baseline_and_mode(
+        baseline=baseline,
+        mode=mode,
+        tmin=times.min(),
+        tmax=times.max()
+    )
+
+    if isinstance(inst, np.ndarray):
+        is_np = True
+        arr = inst
+    else:
+        is_np = False
+        if hasattr(inst, 'data'):
+            attr = 'data'
+        else:
+            attr = '_data'
+        arr = getattr(inst, attr)
+    mne.baseline.rescale(arr, times, baseline, mode=mode, copy=False)
+
+    if not is_np:
+        inst.baseline = baseline
 
     return inst
 
@@ -486,6 +598,40 @@ def zscore(raw):
     return raw.apply_function(lambda x: (x - x.mean()) / x.std(), n_jobs=-1)
 
 
+def scale(raw, median=False):
+    if median:
+        def fn(x):
+            m = np.median(x)
+            s = np.median(np.abs(x - m))
+            return x / s
+    else:
+        def fn(x):
+            return x / x.std()
+
+    return raw.apply_function(fn, n_jobs=-1)
+
+
+def minmax_normalize(raw):
+    def fn(x):
+        m, M = x.min(), x.max()
+        x = (x - m) / (M - m)
+
+        return x
+
+    return raw.apply_function(fn, n_jobs=-1)
+
+
+def quantile_normalize(raw, lq=0.4, uq=0.6):
+    def fn(x, lq=lq, uq=uq):
+        s = np.quantile(x, uq) - np.quantile(x, lq)
+        m = np.median(x)
+        x = (x - m) / s
+
+        return x
+
+    return raw.apply_function(fn, n_jobs=-1)
+
+
 def sem(x, axis=None):
     num = np.std(x, axis=axis, ddof=1)
     n = np.size(x) / np.size(num)
@@ -573,3 +719,64 @@ def psc_transform(raw):
         e = e[None, ...]
     baseline_mask = np.logical_and(times >= s, times <= e).sum(axis=-1).astype(bool)
     return raw.apply_function(_psc_transform, baseline_mask=baseline_mask, n_jobs=-1)
+
+
+def tfr_average(
+        inst,
+        fmin=1,
+        fmax=None,
+        nfreq=25,
+        window_length=0.5,
+        baseline=None,
+        baseline_mode=None,
+        scale_per_band=False,
+        n_jobs=5
+):
+    if fmax is None:
+        fmax = inst.info['sfreq'] / 2 - 1
+    else:
+        inst = inst.resample((fmax * 2) + 1)
+    s = inst._data
+    if len(s.shape) == 2:
+        expanded = True
+        s = s[None, ...]
+    else:
+        expanded = False
+    sfreq = inst.info['sfreq']
+    freqs = np.linspace(fmin, fmax, nfreq)
+    n_cycles = freqs * window_length
+    n_pad = np.ceil(window_length * sfreq).astype(int)
+    # Reflection pad to mitigate edge effects, which mess up baselining
+    s = np.concatenate([
+        np.flip(s[..., :n_pad], axis=-1), s, np.flip(s[..., -n_pad:], axis=-1)
+    ], axis=-1)
+    power = mne.time_frequency.tfr_array_multitaper(
+        s,
+        sfreq,
+        freqs,
+        n_cycles=n_cycles,
+        output='power',
+        decim=1,
+        n_jobs=n_jobs
+    )
+    power = power[..., n_pad:-n_pad]
+    if expanded:
+        power = power[0]
+
+    if scale_per_band:
+        power /= power.std(axis=0, keepdims=True)
+
+    baseline, baseline_mode = get_baseline_and_mode(
+        baseline=baseline,
+        mode=baseline_mode,
+        tmin=inst.times.min(),
+        tmax=inst.times.max(),
+        artifact_window=window_length / 2
+    )
+    power = apply_baseline(power, baseline=baseline, mode=baseline_mode, times=inst.times)
+
+    power = power.mean(axis=-2)  # Average the frequency bands
+
+    inst._data = power
+
+    return inst

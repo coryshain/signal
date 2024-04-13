@@ -86,11 +86,9 @@ def epoch(
     epochs = data.get_epochs(
         raw,
         stimulus_table,
+        postprocessing_steps=postprocessing_steps,
         **get_epochs_kwargs
     )
-    if postprocessing_steps:
-        epochs = data.process_signal(epochs, postprocessing_steps)
-        epochs = epochs.apply_baseline(baseline=epochs.baseline)
 
     epoching_path = get_path(output_dir, 'output', 'epoch', epoching_id, subject=subject)
     epochs.save(epoching_path, overwrite=True)
@@ -109,7 +107,11 @@ def plot(
         groupby_columns=None,
         by_sensor=False,
         split_times=None,
-        as_spectrogram=False
+        as_spectrogram=False,
+        window_length=0.5,
+        vlim=None,
+        baseline=None,
+        baseline_mode=None
 ):
     plotting_dir = get_path(output_dir, 'subdir', 'plot', plotting_id)
     if not os.path.exists(plotting_dir):
@@ -121,7 +123,13 @@ def plot(
         postprocessing_steps=postprocessing_steps,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
+        by_sensor=by_sensor,
+        split_times=split_times,
         as_spectrogram=as_spectrogram,
+        window_length=window_length,
+        baseline=baseline,
+        baseline_mode=baseline_mode,
+        vlim=vlim,
     )
     kwargs_path = get_path(output_dir, 'kwargs', 'plot', plotting_id)
     with open(kwargs_path, 'w') as f:
@@ -140,7 +148,10 @@ def plot(
         groupby_columns=groupby_columns,
         by_sensor=by_sensor,
         postprocessing_steps=postprocessing_steps,
-        as_spectrogram=as_spectrogram
+        as_spectrogram=as_spectrogram,
+        window_length=window_length,
+        baseline=baseline,
+        baseline_mode=baseline_mode,
     )
 
     plotting_path = get_path(output_dir, 'image', 'plot', plotting_id)
@@ -148,6 +159,9 @@ def plot(
 
     if split_times is not None:
         split_times = np.array(split_times, dtype=float)
+
+    if vlim is None:
+        vlim = (-np.inf, np.inf)
 
     output = []
     for group in evoked:
@@ -179,10 +193,12 @@ def plot(
                 plt.close('all')
 
                 vcenter = 0
-                vmin = max(m.min() - 1e-8, -3)
-                vmax = min(m.max() + 1e-8, 3)
+                vmin = m.min() - 1e-8
+                vmax = m.max() - 1e-8
+                vmin = max(vmin, vlim[0])
+                vmax = min(vmax, vlim[1])
                 if vmin < 0 and vmax > 0:
-                    bound = max(abs(vmin), vmax)
+                    bound = max(abs(vmin), abs(vmax))
                     vmin = -bound
                     vmax = bound
                 elif vmin < 0.:
