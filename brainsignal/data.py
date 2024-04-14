@@ -687,11 +687,11 @@ def smooth(raw, w=0.1, n_jobs=-1, **kwargs):
     return raw.apply_function(_smooth, w=w, n_jobs=n_jobs, **kwargs)
 
 
-def savgol_filter(raw, w=0.5, polyorder=5, n_jobs=-1, **kwargs):
-    w = int(np.round(w * raw.info['sfreq']))
+def savgol_filter(raw, window_length=0.5, polyorder=5, n_jobs=-1, **kwargs):
+    window_length = int(np.round(window_length * raw.info['sfreq']))
     return raw.apply_function(
         scipy.signal.savgol_filter,
-        window_length=w,
+        window_length=window_length,
         n_jobs=n_jobs,
         polyorder=polyorder,
         **kwargs
@@ -739,7 +739,7 @@ def tfr_average(
         window_length=0.5,
         baseline=None,
         baseline_mode=None,
-        scale_per_band=False,
+        scale_by_band=False,
         n_jobs=5
 ):
     if fmax is None:
@@ -772,7 +772,7 @@ def tfr_average(
     if expanded:
         power = power[0]
 
-    if scale_per_band:
+    if scale_by_band:
         power /= power.std(axis=0, keepdims=True)
 
     baseline, baseline_mode = get_baseline_and_mode(
