@@ -109,6 +109,7 @@ def plot(
         split_times=None,
         as_spectrogram=False,
         window_length=0.5,
+        scale_by_band=False,
         vlim=None,
         baseline=None,
         baseline_mode=None
@@ -127,6 +128,7 @@ def plot(
         split_times=split_times,
         as_spectrogram=as_spectrogram,
         window_length=window_length,
+        scale_by_band=scale_by_band,
         baseline=baseline,
         baseline_mode=baseline_mode,
         vlim=vlim,
@@ -150,6 +152,7 @@ def plot(
         postprocessing_steps=postprocessing_steps,
         as_spectrogram=as_spectrogram,
         window_length=window_length,
+        scale_by_band=scale_by_band,
         baseline=baseline,
         baseline_mode=baseline_mode,
     )

@@ -132,7 +132,7 @@ def get_baseline_and_mode(
         baseline[1] = tmax
 
     if baseline[0] is not None and tmin is not None and artifact_window:
-        baseline[0] = max(baseline[0], tmin + artifact_window / 2)
+        baseline[0] = max(baseline[0], tmin + artifact_window)
     if baseline[1] is not None and tmax is not None and artifact_window:
         baseline[1] = min(baseline[1], tmax - artifact_window)
 
@@ -203,7 +203,7 @@ def get_epochs(
         tmin=epochs.times.min(),
         tmax=epochs.times.max()
     )
-    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
+    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
 
     if normalize_time:
         # Data must be resampled to a fixed number of steps or else epochs may have variable length
@@ -235,7 +235,7 @@ def get_epochs_data_by_indices(
         tmin=epochs.times.min(),
         tmax=epochs.times.max()
     )
-    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
+    epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
     s = epochs.get_data(copy=False, picks=ch_names)
     t = s.shape[-1]
     evoked = s.reshape((-1, t))
@@ -256,7 +256,8 @@ def get_epochs_spectrogram_by_indices(
         baseline=None,
         baseline_mode=None,
         scale_by_band=False,
-        ch_names=None
+        ch_names=None,
+        n_jobs=-1
 ):
     s = epochs[indices]
     sfreq = epochs.info['sfreq']
@@ -277,7 +278,7 @@ def get_epochs_spectrogram_by_indices(
         decim=10,
         picks=ch_names,
         average=False,
-        n_jobs=-1
+        n_jobs=n_jobs
     )
     if db:
         power.data = 10 * np.log10(power.data)
@@ -291,7 +292,8 @@ def get_epochs_spectrogram_by_indices(
         tmax=power.times.max(),
         artifact_window=artifact_window
     )
-    power = apply_baseline(power, baseline=baseline, mode=baseline_mode)
+    power = apply_baseline(power, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
+
     tmin, tmax = power.times[[0, -1]]
     power = power.crop(tmin + artifact_window, tmax - artifact_window)
     times = power.times
@@ -334,6 +336,7 @@ def get_evoked(
         postprocessing_steps=None,
         as_spectrogram=False,
         window_length=0.5,
+        scale_by_band=False,
         baseline=None,
         baseline_mode=None,
 ):
@@ -360,7 +363,7 @@ def get_evoked(
                 tmin=epochs.times.min(),
                 tmax=epochs.times.max()
             )
-            epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode)
+            epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
         stimulus_table = get_table(epochs)
         if groupby_columns != [None]:
             gb_iter = stimulus_table.groupby(groupby_columns)
@@ -397,6 +400,7 @@ def get_evoked(
                             baseline=baseline,
                             baseline_mode=baseline_mode,
                             window_length=window_length,
+                            scale_by_band=scale_by_band,
                             ch_names=ch_name,
                         )
                     else:
@@ -427,7 +431,6 @@ def get_evoked(
     assert times is not None, 'At least one epochs file must be provided'
 
     return evoked, times, fmin, fmax
-
 
 
 def load_epochs(
@@ -480,12 +483,14 @@ def process_signal(inst, steps):
     return inst
 
 
-def apply_baseline(inst, baseline=None, mode=None, times=None):
+def apply_baseline(inst, baseline=None, mode=None, times=None, sfreq=None):
     if baseline is None:
         return inst
 
     if times is None:
         times = inst.times
+    if sfreq is None:
+        sfreq = inst.info["sfreq"]
 
     baseline, mode = get_baseline_and_mode(
         baseline=baseline,
@@ -504,6 +509,9 @@ def apply_baseline(inst, baseline=None, mode=None, times=None):
         else:
             attr = '_data'
         arr = getattr(inst, attr)
+    baseline = mne.baseline._check_baseline(
+        baseline, times=times, sfreq=sfreq
+    )
     mne.baseline.rescale(arr, times, baseline, mode=mode, copy=False)
 
     if not is_np:
@@ -553,19 +561,20 @@ def filter(
         fmin=None,
         fmax=None,
         method='iir',
+        n_jobs=-1,
         **kwargs
 ):
     return raw.filter(
         l_freq=fmin,
         h_freq=fmax,
         method=method,
-        n_jobs=-1,
+        n_jobs=n_jobs,
         **kwargs
     )
 
 
-def notch_filter(raw, freqs=(60,120,180,240), method='fir', **kwargs):
-    raw = raw.notch_filter(freqs, method=method, n_jobs=-1, **kwargs)
+def notch_filter(raw, freqs=(60,120,180,240), method='fir', n_jobs=-1, **kwargs):
+    raw = raw.notch_filter(freqs, method=method, n_jobs=n_jobs, **kwargs)
 
     return raw
 
@@ -585,20 +594,21 @@ def resample(
         raw,
         sfreq,
         window='hamming',
+        n_jobs=-1,
         **kwargs
 ):
-    return raw.resample(sfreq, window=window, n_jobs=-1, **kwargs)
+    return raw.resample(sfreq, window=window, n_jobs=n_jobs, **kwargs)
 
 
 def hilbert(raw, **kwargs):
     return raw.apply_hilbert(envelope=True, **kwargs)
 
 
-def zscore(raw):
-    return raw.apply_function(lambda x: (x - x.mean()) / x.std(), n_jobs=-1)
+def zscore(raw, n_jobs=-1):
+    return raw.apply_function(lambda x: (x - x.mean()) / x.std(), n_jobs=n_jobs)
 
 
-def scale(raw, median=False):
+def scale(raw, median=False, n_jobs=-1):
     if median:
         def fn(x):
             m = np.median(x)
@@ -608,20 +618,20 @@ def scale(raw, median=False):
         def fn(x):
             return x / x.std()
 
-    return raw.apply_function(fn, n_jobs=-1)
+    return raw.apply_function(fn, n_jobs=n_jobs)
 
 
-def minmax_normalize(raw):
+def minmax_normalize(raw, n_jobs=-1):
     def fn(x):
         m, M = x.min(), x.max()
         x = (x - m) / (M - m)
 
         return x
 
-    return raw.apply_function(fn, n_jobs=-1)
+    return raw.apply_function(fn, n_jobs=n_jobs)
 
 
-def quantile_normalize(raw, lq=0.4, uq=0.6):
+def quantile_normalize(raw, lq=0.4, uq=0.6, n_jobs=-1):
     def fn(x, lq=lq, uq=uq):
         s = np.quantile(x, uq) - np.quantile(x, lq)
         m = np.median(x)
@@ -629,7 +639,7 @@ def quantile_normalize(raw, lq=0.4, uq=0.6):
 
         return x
 
-    return raw.apply_function(fn, n_jobs=-1)
+    return raw.apply_function(fn, n_jobs=n_jobs)
 
 
 def sem(x, axis=None):
@@ -653,9 +663,9 @@ def _rms(x, w):
     return out
 
 
-def rms(raw, w=0.1, **kwargs):
+def rms(raw, w=0.1, n_jobs=-1, **kwargs):
     w = int(np.round(w * raw.info['sfreq']))
-    return raw.apply_function(_rms, w=w, n_jobs=-1, **kwargs)
+    return raw.apply_function(_rms, w=w, n_jobs=n_jobs, **kwargs)
 
 
 def _smooth(x, w):
@@ -672,17 +682,17 @@ def _smooth(x, w):
     return out
 
 
-def smooth(raw, w=0.1, **kwargs):
+def smooth(raw, w=0.1, n_jobs=-1, **kwargs):
     w = int(np.round(w * raw.info['sfreq']))
-    return raw.apply_function(_smooth, w=w, n_jobs=-1, **kwargs)
+    return raw.apply_function(_smooth, w=w, n_jobs=n_jobs, **kwargs)
 
 
-def savgol_filter(raw, w=0.25, polyorder=5, **kwargs):
+def savgol_filter(raw, w=0.5, polyorder=5, n_jobs=-1, **kwargs):
     w = int(np.round(w * raw.info['sfreq']))
     return raw.apply_function(
         scipy.signal.savgol_filter,
         window_length=w,
-        n_jobs=-1,
+        n_jobs=n_jobs,
         polyorder=polyorder,
         **kwargs
     )
@@ -705,11 +715,11 @@ def _detrend(y, polyorder=6):
     return detrended
 
 
-def detrend(raw, **kwargs):
-    return raw.apply_function(_detrend, n_jobs=-1, **kwargs)
+def detrend(raw, n_jobs=-1, **kwargs):
+    return raw.apply_function(_detrend, n_jobs=n_jobs, **kwargs)
 
 
-def psc_transform(raw):
+def psc_transform(raw, n_jobs=-1):
     fixation_table = get_table(raw)
     s, e = fixation_table.onset.values, fixation_table.offset.values
     times = raw.times[..., None]
@@ -718,14 +728,14 @@ def psc_transform(raw):
     while len(e.shape) < len(times.shape):
         e = e[None, ...]
     baseline_mask = np.logical_and(times >= s, times <= e).sum(axis=-1).astype(bool)
-    return raw.apply_function(_psc_transform, baseline_mask=baseline_mask, n_jobs=-1)
+    return raw.apply_function(_psc_transform, baseline_mask=baseline_mask, n_jobs=n_jobs)
 
 
 def tfr_average(
         inst,
         fmin=1,
         fmax=None,
-        nfreq=25,
+        n_freqs=25,
         window_length=0.5,
         baseline=None,
         baseline_mode=None,
@@ -743,13 +753,12 @@ def tfr_average(
     else:
         expanded = False
     sfreq = inst.info['sfreq']
-    freqs = np.linspace(fmin, fmax, nfreq)
+    freqs = np.linspace(fmin, fmax, n_freqs)
     n_cycles = freqs * window_length
     n_pad = np.ceil(window_length * sfreq).astype(int)
-    # Reflection pad to mitigate edge effects, which mess up baselining
     s = np.concatenate([
         np.flip(s[..., :n_pad], axis=-1), s, np.flip(s[..., -n_pad:], axis=-1)
-    ], axis=-1)
+    ], axis=-1)  # Reflection pad to mitigate edge effects, which mess up baselining
     power = mne.time_frequency.tfr_array_multitaper(
         s,
         sfreq,
@@ -773,7 +782,7 @@ def tfr_average(
         tmax=inst.times.max(),
         artifact_window=window_length / 2
     )
-    power = apply_baseline(power, baseline=baseline, mode=baseline_mode, times=inst.times)
+    power = apply_baseline(power, baseline=baseline, mode=baseline_mode, times=inst.times, sfreq=inst.info['sfreq'])
 
     power = power.mean(axis=-2)  # Average the frequency bands
 
