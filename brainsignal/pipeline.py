@@ -102,6 +102,9 @@ def plot(
         subjects,
         plotting_id,
         epoching_id,
+        normalize_time=False,
+        tmin_normalized=None,
+        tmax_normalized=None,
         postprocessing_steps=None,
         label_columns=None,
         groupby_columns=None,
@@ -121,6 +124,9 @@ def plot(
         output_dir=output_dir,
         plotting_id=plotting_id,
         epoching_id=epoching_id,
+        normalize_time=normalize_time,
+        tmin_normalized=tmin_normalized,
+        tmax_normalized=tmax_normalized,
         postprocessing_steps=postprocessing_steps,
         label_columns=label_columns,
         groupby_columns=groupby_columns,
@@ -149,6 +155,9 @@ def plot(
         label_columns=label_columns,
         groupby_columns=groupby_columns,
         by_sensor=by_sensor,
+        normalize_time=normalize_time,
+        tmin_normalized=tmin_normalized,
+        tmax_normalized=tmax_normalized,
         postprocessing_steps=postprocessing_steps,
         as_spectrogram=as_spectrogram,
         window_length=window_length,
@@ -180,7 +189,7 @@ def plot(
 
         for i, label in enumerate(evoked[group]):
             s = evoked[group][label]
-            m = s.mean(axis=0)
+            m = np.nanmean(s, axis=0)
             e = data.sem(s, axis=0)
             row = dict(
                 group=group,
@@ -246,10 +255,10 @@ def plot(
                                 _split_times
                             )
                     ):
-                        _m_bin = _s.mean(axis=None)
+                        _m_bin = np.nanmean(_s)
                         m_bin.append(_m_bin)
                         _m_bin = _m_bin * np.ones_like(_times)
-                        _e_bin = data.sem(_s, axis=0).mean()
+                        _e_bin = np.nanmean(data.sem(_s, axis=0))
                         e_bin.append(_e_bin)
                         _e_bin = _e_bin * np.ones_like(_times)
                         _t_bin = _times.mean()

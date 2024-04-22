@@ -47,16 +47,19 @@ def get_stimulus_data(h5, stimulus_type='event'):
             event_offset = timing_table['event_offset'].values
             event_offset = (event_offset - 1) / freq
             event_duration = event_offset - event_onset
+            presentation_rate = 1. / event_duration
 
             trial_onset = event_onset[0]
             trial_offset = event_offset[-1]
             trial_duration = trial_offset - trial_onset
+            trial_presentation_rate = presentation_rate[0]
             trial_index = i + 1
 
             if stimulus_type == 'event':
                 timing_table['event_onset'] = event_onset
                 timing_table['event_offset'] = event_offset
                 timing_table['event_duration'] = event_duration
+                timing_table['presentation_rate'] = presentation_rate
 
                 timing_table['trial_onset'] = trial_onset
                 timing_table['trial_offset'] = trial_offset
@@ -74,6 +77,7 @@ def get_stimulus_data(h5, stimulus_type='event'):
                 event_table['trial_onset'] = trial_onset
                 event_table['trial_offset'] = trial_offset
                 event_table['trial_duration'] = trial_duration
+                event_table['presentation_rate'] = trial_presentation_rate
 
                 event_table['trial_index'] = trial_index
 

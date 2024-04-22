@@ -150,13 +150,10 @@ def get_epochs(
         pad_left_s=0.1,
         pad_right_s=0.,
         postprocessing_steps=None,
-        n_ticks=None,
         duration=None,
         picks=None,
         baseline=None,
         baseline_mode=None,
-        normalize_time=False,
-        event_duration=None
 ):
     tmin = -pad_left_s
     if duration is None:
@@ -169,18 +166,6 @@ def get_epochs(
 
     # Get event times
     event_times = stimulus_table['onset'].values
-
-    if normalize_time:
-        assert event_duration is not None, 'normalize_time requires event_duration to be specified'
-        sfreq = raw.info['sfreq'] * event_duration
-        _info = mne.create_info(raw.info['ch_names'], sfreq, ch_types=raw.info.get_channel_types())
-        _info['description'] = raw.info['description']
-        _info['bads'] = raw.info['bads']
-        _raw = mne.io.RawArray(raw.get_data(picks='all'), _info)
-        del raw
-        raw = _raw
-
-        event_times = event_times / event_duration
 
     event_times = np.round(event_times * raw.info['sfreq']).astype(int)
     events[:, 0] = event_times
@@ -205,17 +190,6 @@ def get_epochs(
     )
     epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
 
-    if normalize_time:
-        # Data must be resampled to a fixed number of steps or else epochs may have variable length
-        if not n_ticks:
-            n_ticks = 1000
-        duration = tmax - tmin
-        sfreq = epochs.info['sfreq']
-        sfreq_new = n_ticks / duration
-        if sfreq != sfreq_new:
-            epochs = epochs.resample(sfreq_new)
-            epochs = epochs.crop(tmin, tmax, include_tmax=False)
-
     set_table(epochs, stimulus_table)
 
     return epochs
@@ -227,6 +201,9 @@ def get_epochs_data_by_indices(
         baseline=None,
         baseline_mode=None,
         ch_names=None,
+        time_normalization_factor=None,
+        tmin_normalized=None,
+        tmax_normalized=None
 ):
     epochs = epochs[indices]
     baseline, baseline_mode = get_baseline_and_mode(
@@ -238,8 +215,37 @@ def get_epochs_data_by_indices(
     epochs = apply_baseline(epochs, baseline=baseline, mode=baseline_mode, sfreq=epochs.info['sfreq'])
     s = epochs.get_data(copy=False, picks=ch_names)
     t = s.shape[-1]
-    evoked = s.reshape((-1, t))
     times = epochs.times
+
+    if time_normalization_factor is not None:
+        assert tmin_normalized is not None, ('If time_normalization_factor is provided, '
+                                                 'tmin_normalized must also be provided.')
+        assert tmax_normalized is not None, ('If time_normalization_factor is provided, '
+                                                 'tmax_normalized must also be provided.')
+        times_normalized = np.linspace(tmin_normalized, tmax_normalized, t)
+        time_normalization_factor = np.array(time_normalization_factor)
+        if not len(time_normalization_factor.shape):
+            time_normalization_factor = np.ones(s.shape[0]) * time_normalization_factor
+        assert len(time_normalization_factor) == len(s), ('Mismatched time_normalization_factor. ' 
+            'Expected either a scalar or %d-length vector, got %d-length vector.' % (
+                len(s), len(time_normalization_factor)))
+        _s = np.full_like(s, np.nan)
+        for i in range(len(s)):
+            _times = times / time_normalization_factor[i]
+            _sel = np.logical_and(_times >= tmin_normalized, _times < tmax_normalized)
+            n = _sel.sum()
+            s_ix = np.argmax(_sel)
+            e_ix = s_ix + n
+            tmin = max(_times.min(), tmin_normalized)
+            tmax = min(_times.max(), tmax_normalized)
+            _sel = np.logical_and(times_normalized >= tmin, times_normalized <= tmax)
+            n = _sel.sum()
+            s_ix_normalized = np.argmax(_sel)
+            e_ix_normalized = s_ix_normalized + n
+            _s[i, ..., s_ix_normalized:e_ix_normalized] = scipy.signal.resample(s[i, ..., s_ix:e_ix], n, axis=-1)
+        s = _s
+        times = times_normalized
+    evoked = s.reshape((-1, t))
 
     return evoked, times
 
@@ -332,6 +338,9 @@ def get_evoked(
         paths,
         label_columns=None,
         groupby_columns=None,
+        normalize_time=False,
+        tmin_normalized=None,
+        tmax_normalized=None,
         by_sensor=False,
         postprocessing_steps=None,
         as_spectrogram=False,
@@ -391,10 +400,16 @@ def get_evoked(
                     ch_names = [None]
                     keys = [key]
                 for _key, ch_name in zip(keys, ch_names):
+                    _index_names = indices_by_label[label]
+                    if normalize_time:
+                        _indices = [epochs.event_id[x] for x in _index_names]
+                        _time_normalization_factor = 1. / stimulus_table.presentation_rate.values[_indices]
+                    else:
+                        _time_normalization_factor = None
                     if as_spectrogram:
                         _evoked, _times = get_epochs_spectrogram_by_indices(
                             epochs,
-                            indices_by_label[label],
+                            _index_names,
                             fmin=fmin,
                             fmax=fmax,
                             baseline=baseline,
@@ -406,10 +421,14 @@ def get_evoked(
                     else:
                         _evoked, _times = get_epochs_data_by_indices(
                             epochs,
-                            indices_by_label[label],
+                            _index_names,
                             baseline=baseline,
                             baseline_mode=baseline_mode,
-                            ch_names=ch_name
+                            ch_names=ch_name,
+                            time_normalization_factor=_time_normalization_factor,
+                            tmin_normalized=tmin_normalized,
+                            tmax_normalized=tmax_normalized,
+
                         )
                     if times is None:
                         times = _times
@@ -687,8 +706,8 @@ def quantile_normalize(raw, lq=0.4, uq=0.6, n_jobs=-1):
 
 
 def sem(x, axis=None):
-    num = np.std(x, axis=axis, ddof=1)
-    n = np.size(x) / np.size(num)
+    num = np.nanstd(x, axis=axis, ddof=1)
+    n = np.isfinite(x).sum() / np.isfinite(num).sum()
     return  num / np.sqrt(n)
 
 
