@@ -119,12 +119,10 @@ if __name__ == '__main__':
                                     stimulus_type=action_kwargs.get('stimulus_type', 'event')
                                 )
                             )
-                            event_duration = data_info['event_duration']
                             pipeline.epoch(
                                 output_dir,
                                 subject,
                                 stimulus_table_path=stimulus_table_path,
-                                event_duration=event_duration,
                                 **action_kwargs
                             )
                             memo.add(output_path)
