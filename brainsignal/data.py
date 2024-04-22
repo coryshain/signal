@@ -483,6 +483,50 @@ def process_signal(inst, steps):
     return inst
 
 
+def _rescale(data, times, baseline, mode="mean"):
+    try:
+        return mne.baseline.rescale(data, times, baseline, mode=mode, copy=False, picks=None, verbose=None)
+    except ValueError:
+        # Get baseline indices
+        bmin, bmax = baseline
+        if bmin is None:
+            imin = 0
+        else:
+            imin = np.where(times >= bmin)[0]
+            if len(imin) == 0:
+                raise ValueError(
+                    f"bmin is too large ({bmin}), it exceeds the largest time value"
+                )
+            imin = int(imin[0])
+        if bmax is None:
+            imax = len(times)
+        else:
+            imax = np.where(times <= bmax)[0]
+            if len(imax) == 0:
+                raise ValueError(
+                    f"bmax is too small ({bmax}), it is smaller than the smallest time "
+                    "value"
+                )
+            imax = int(imax[-1]) + 1
+        if imin >= imax:
+            raise ValueError(
+                f"Bad rescaling slice ({imin}:{imax}) from time values {bmin}, {bmax}"
+            )
+
+        if mode == 'scale':
+            def fun(d, imin=imin, imax=imax):
+                s = np.std(d[..., imin:imax], axis=-1, keepdims=True)
+                d /= s
+
+                return d
+        else:
+            fun = mode
+
+        fun(data)
+
+        return data
+
+
 def apply_baseline(inst, baseline=None, mode=None, times=None, sfreq=None):
     if baseline is None:
         return inst
@@ -512,7 +556,7 @@ def apply_baseline(inst, baseline=None, mode=None, times=None, sfreq=None):
     baseline = mne.baseline._check_baseline(
         baseline, times=times, sfreq=sfreq
     )
-    mne.baseline.rescale(arr, times, baseline, mode=mode, copy=False)
+    _rescale(arr, times, baseline, mode=mode)
 
     if not is_np:
         inst.baseline = baseline
@@ -740,6 +784,7 @@ def tfr_average(
         baseline=None,
         baseline_mode=None,
         scale_by_band=False,
+        agg='mean',
         n_jobs=5
 ):
     if fmax is None:
@@ -773,7 +818,7 @@ def tfr_average(
         power = power[0]
 
     if scale_by_band:
-        power /= power.std(axis=0, keepdims=True)
+        power /= power.std(axis=-1, keepdims=True)
 
     baseline, baseline_mode = get_baseline_and_mode(
         baseline=baseline,
@@ -784,7 +829,7 @@ def tfr_average(
     )
     power = apply_baseline(power, baseline=baseline, mode=baseline_mode, times=inst.times, sfreq=inst.info['sfreq'])
 
-    power = power.mean(axis=-2)  # Average the frequency bands
+    power = getattr(np, agg)(power, axis=-2)  # Aggregate over the frequency bands
 
     inst._data = power
 
